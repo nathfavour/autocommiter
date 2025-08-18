@@ -39,6 +39,133 @@ function runGitCommand(cmd: string, cwd: string): Promise<string> {
 	});
 }
 
+// Normalize path to posix relative path from repoRoot
+function toPosix(rel: string) {
+	return rel.split(path.sep).join('/');
+}
+
+async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
+	const gitignorePath = path.join(repoRoot, '.gitignore');
+	let existing = '';
+	try {
+		existing = fs.readFileSync(gitignorePath, 'utf8');
+	} catch (e) {
+		existing = '';
+	}
+
+	const lines = existing.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('#'));
+
+	// helper to match patterns (supports simple globs with *)
+	const patternMatches = (pattern: string, p: string) => {
+		// convert gitignore pattern to regex
+		const esc = pattern.replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
+		const re = new RegExp('^' + esc + '$');
+		return re.test(p);
+	};
+
+	const isIgnored = (relPath: string) => {
+		const p = toPosix(relPath);
+		for (const pat of lines) {
+			// direct compare
+			if (pat === p) return true;
+			// directory pattern
+			if (pat.endsWith('/') && (p === pat.slice(0, -1) || p.startsWith(pat))) return true;
+			// try glob match
+			try {
+				const esc = pat.replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
+				const re = new RegExp('^' + esc + '$');
+				if (re.test(p)) return true;
+			} catch {
+				// ignore bad patterns
+			}
+		}
+		return false;
+	};
+
+	// Ensure env/docx patterns
+	const required = ['*.env*', '.env*', 'docx/', '.docx/'];
+	const toAppend: string[] = [];
+	for (const req of required) {
+		let found = false;
+		for (const l of lines) {
+			if (l === req) { found = true; break; }
+			// rough match using simple glob logic
+			try {
+				const esc = l.replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
+				if (new RegExp('^' + esc + '$').test(req)) { found = true; break; }
+			} catch {}
+		}
+		if (!found) toAppend.push(`# Added by Autocommiter: ensure ${req}`, req);
+	}
+
+	// Find nested .git directories, skipping ignored directories
+	const nestedGitParents: string[] = [];
+	function walk(dir: string) {
+		const entries = fs.readdirSync(dir, { withFileTypes: true });
+		for (const e of entries) {
+			const full = path.join(dir, e.name);
+			const rel = path.relative(repoRoot, full);
+			const relPosix = toPosix(rel || '.');
+			if (isIgnored(relPosix)) {
+				// skip this directory entirely
+				if (e.isDirectory()) continue;
+			}
+			if (e.isDirectory()) {
+				if (e.name === '.git') {
+					const parent = path.dirname(full);
+					const parentRel = toPosix(path.relative(repoRoot, parent));
+					// ignore the repo root .git
+					if (parentRel === '' || parentRel === '.') continue;
+					if (!nestedGitParents.includes(parentRel)) nestedGitParents.push(parentRel);
+					continue;
+				}
+				// recurse
+				try { walk(full); } catch {}
+			}
+		}
+	}
+	try { walk(repoRoot); } catch (e) { /* ignore walk errors */ }
+
+	// Parse .gitmodules if present
+	const gitmodulesPath = path.join(repoRoot, '.gitmodules');
+	const gitmodulePaths: string[] = [];
+	try {
+		const gm = fs.readFileSync(gitmodulesPath, 'utf8');
+		const pathRe = /^\s*path\s*=\s*(.+)$/gim;
+		let m: RegExpExecArray | null;
+		while ((m = pathRe.exec(gm)) !== null) {
+			gitmodulePaths.push(toPosix(m[1].trim()));
+		}
+	} catch {}
+
+	// For each nested git parent, ensure it's not listed in gitmodules and not ignored already
+	for (const p of nestedGitParents) {
+		if (gitmodulePaths.includes(p)) continue;
+		if (isIgnored(p)) continue;
+		// As an extra safety check, cd into the directory and ensure it's not referenced in .gitmodules in that subrepo
+		try {
+			const subGitmodules = path.join(repoRoot, p, '.gitmodules');
+			if (fs.existsSync(subGitmodules)) {
+				const sub = fs.readFileSync(subGitmodules, 'utf8');
+				// if submodule config references back to this path, skip
+				if (sub.includes(p)) continue;
+			}
+		} catch {}
+		toAppend.push(`# Added by Autocommiter: ignore nested repo ${p}`);
+		toAppend.push(p + '/');
+	}
+
+	if (toAppend.length > 0) {
+		const toWrite = (existing && existing.trim().length > 0 ? existing + '\n' : '') + toAppend.join('\n') + '\n';
+		try {
+			fs.writeFileSync(gitignorePath, toWrite, { encoding: 'utf8' });
+			vscode.window.showInformationMessage('Autocommiter updated .gitignore to protect sensitive files and nested repos.');
+		} catch (e) {
+			vscode.window.showWarningMessage('Autocommiter could not update .gitignore automatically. Please ensure .env and docx are ignored and subrepo paths are added.');
+		}
+	}
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -83,6 +210,9 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 
 				// 1) Stage all changes
+				// Safety: ensure .gitignore has protections before staging
+				progress.report({ message: 'Ensuring .gitignore safety…' });
+				try { await ensureGitignoreSafety(cwd); } catch {}
 				progress.report({ message: 'Staging changes (git add .)…' });
 				await runGitCommand('git add .', cwd);
 
