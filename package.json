@@ -22,7 +22,7 @@
       },
       {
         "command": "autocommiter.generateMessage",
-        "title": "Autocommiter: Generate commit message"
+        "title": "Autocommit"
       }
     ],
     "menus": {

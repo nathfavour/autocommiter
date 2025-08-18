@@ -7,8 +7,20 @@ interface GitExtension {
 	getAPI(version: number): GitAPI;
 }
 
+interface RepositoryState {
+	indexChanges?: any[];
+	workingTreeChanges?: any[];
+	mergeChanges?: any[];
+}
+
+interface GitRepository {
+	inputBox: { value: string };
+	rootUri: vscode.Uri;
+	state?: RepositoryState;
+}
+
 interface GitAPI {
-	repositories: Array<{ inputBox: { value: string }; rootUri: vscode.Uri }>;
+	repositories: GitRepository[];
 }
 
 // This method is called when your extension is activated
@@ -39,6 +51,30 @@ export function activate(context: vscode.ExtensionContext) {
 					const api = gitExt.getAPI(1);
 					const repo = api.repositories[0];
 					if (repo) {
+						// If repository state is available, check for staged or working-tree changes
+						const state = repo.state;
+						const indexCount = state?.indexChanges ? state.indexChanges.length : 0;
+						const workingCount = state?.workingTreeChanges ? state.workingTreeChanges.length : 0;
+						if (indexCount + workingCount === 0) {
+							// Nothing to commit
+							vscode.window.showInformationMessage('No changes to commit — Autocommit skipped.');
+							return;
+						}
+
+						// Attempt to use Copilot's generator first, if available
+						try {
+							// The Copilot command expects scmProvider == 'git'
+							const copilotResult = await vscode.commands.executeCommand('github.copilot.git.generateCommitMessage');
+							// If the command produced a result or set the input, prefer it
+							if (copilotResult) {
+								vscode.window.showInformationMessage('Autocommit used Copilot to generate the commit message.');
+								return;
+							}
+						} catch (e) {
+							// Command not available or failed; fall back to local generator
+							// console.debug('Copilot generate command not available or failed', e);
+						}
+
 						// Attempt to use inputBox existing value and repository root
 						const current = repo.inputBox.value || '';
 						const root = repo.rootUri ? repo.rootUri.fsPath : undefined;
@@ -73,9 +109,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Status bar item (wand emoji) placed near the right
 	const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-	status.text = '🪄 Generate commit';
+	status.text = '🪄 Autocommit';
 	status.command = 'autocommiter.generateMessage';
-	status.tooltip = 'Generate a commit message using Autocommiter';
+	status.tooltip = 'Autocommit — generate a commit message using Autocommiter';
 	status.show();
 	context.subscriptions.push(status);
 }
