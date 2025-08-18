@@ -348,29 +348,31 @@ export function activate(context: vscode.ExtensionContext) {
 					copilotFailed = true;
 				}
 
-				// 4) If Copilot failed, offer to use a GitHub API key-based inference endpoint
+				// 4) If Copilot failed, silently try API-key-based inference fallback.
+				// Prompt only if there is no stored API key (getOrPromptApiKey will prompt and store).
 				if (!message && copilotFailed) {
-					const pick = await vscode.window.showInformationMessage('Copilot commit generation failed. Use an API key to generate commit message instead?', 'Use API key', 'Skip');
-					if (pick === 'Use API key') {
-						try {
-							const apiKey = await getOrPromptApiKey(context);
-							if (apiKey) {
-								// Build a concise prompt including staged filenames
-								// Build per-file changes and a compressed JSON payload (<=400 chars) to include with the prompt
-								const fileChanges = await changesSummarizer.buildFileChanges(cwd);
-								const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
-								const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
-								const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
-								const aiResult = await callInferenceApi(apiKey, userPrompt);
-								if (aiResult && aiResult.trim().length > 0) {
-									message = aiResult.trim();
-									vscode.window.showInformationMessage('Autocommit used API key to generate the commit message.');
-								}
+					progress.report({ message: 'Generating commit message (API fallback)…' });
+					try {
+						const apiKey = await getOrPromptApiKey(context);
+						// If user didn't provide a key (they cancelled the prompt), abandon the API fallback silently
+						if (apiKey) {
+							// Build per-file changes and a compressed JSON payload (<=400 chars) to include with the prompt
+							const fileChanges = await changesSummarizer.buildFileChanges(cwd);
+							const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
+							const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
+							const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
+							const aiResult = await callInferenceApi(apiKey, userPrompt);
+							if (aiResult && aiResult.trim().length > 0) {
+								message = aiResult.trim();
+								vscode.window.showInformationMessage('Autocommit used API key to generate the commit message.');
 							}
-						} catch (e) {
-							console.error('Autocommiter API generation failed', e);
-							vscode.window.showWarningMessage('API-based generation failed. Falling back to local generator.');
+						} else {
+							// no key available; skip silently and fall back to local generator
+							console.log('Autocommiter: no API key available, skipping API fallback.');
 						}
+					} catch (e) {
+						console.error('Autocommiter API generation failed', e);
+						vscode.window.showWarningMessage('API-based generation failed. Falling back to local generator.');
 					}
 				}
 
