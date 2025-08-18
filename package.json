@@ -24,7 +24,16 @@
         "command": "autocommiter.generateMessage",
         "title": "Autocommiter: Generate commit message"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "when": "view == scm",
+          "command": "autocommiter.generateMessage",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
