@@ -1,6 +1,6 @@
 {
-  "name": "autocommiter",
-  "displayName": "autocommiter",
+  "name": "autocommiterr",
+  "displayName": "autocommiter copilot",
   "description": "auto commit messages using github",
   "repository": "https://github.com/nathfavour/autocommiter",
   "publisher": "nathfavour",
