@@ -121,9 +121,9 @@ export function deactivate() {}
 
 // Very small heuristic generator — placeholder for integrating with GitHub/Copilot APIs.
 async function generateMessageFromContext(currentInput: string, repoRoot?: string): Promise<string> {
-	// If user already typed something, prefer to augment it
+	// If user already typed something, preserve it verbatim
 	if (currentInput && currentInput.trim().length > 0) {
-		return `${currentInput.trim()} — (enhanced by Autocommiter)`;
+		return currentInput.trim();
 	}
 
 	// Otherwise craft a short, generic message. In future this should inspect staged changes or call GitHub/Copilot.
