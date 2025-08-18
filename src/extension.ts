@@ -45,6 +45,81 @@ function toPosix(rel: string) {
 	return rel.split(path.sep).join('/');
 }
 
+async function getOrPromptApiKey(context: vscode.ExtensionContext): Promise<string | undefined> {
+	const keyId = 'autocommiter.apiKey';
+	try {
+		const existing = await context.secrets.get(keyId);
+		if (existing) return existing;
+	} catch {}
+
+	const entered = await vscode.window.showInputBox({
+		prompt: 'Enter GitHub API key (will be stored securely in VS Code SecretStorage)',
+		ignoreFocusOut: true,
+		password: true
+	});
+	if (entered && entered.trim().length > 0) {
+		try {
+			await context.secrets.store(keyId, entered.trim());
+			return entered.trim();
+		} catch (e) {
+			// fallback
+			return entered.trim();
+		}
+	}
+	return undefined;
+}
+
+function callInferenceApi(apiKey: string, userPrompt: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const payload = JSON.stringify({
+			messages: [
+				{ role: 'system', content: 'You are a helpful assistant.' },
+				{ role: 'user', content: userPrompt }
+			],
+			model: 'openai/gpt-4.1'
+		});
+
+		const url = new URL('https://models.inference.ai.azure.com/chat/completions');
+		const opts: https.RequestOptions = {
+			method: 'POST',
+			hostname: url.hostname,
+			path: url.pathname,
+			headers: {
+				'Content-Type': 'application/json',
+				'Content-Length': Buffer.byteLength(payload),
+				'Authorization': `Bearer ${apiKey}`
+			}
+		};
+
+		const req = https.request(opts, res => {
+			let body = '';
+			res.on('data', d => body += d);
+			res.on('end', () => {
+				try {
+					const json = JSON.parse(body);
+					// try typical response shapes
+					if (json.choices && Array.isArray(json.choices) && json.choices[0]?.message?.content) {
+						resolve(String(json.choices[0].message.content));
+						return;
+					}
+					if (json.output && Array.isArray(json.output) && json.output[0]?.content && json.output[0].content[0]?.text) {
+						resolve(String(json.output[0].content[0].text));
+						return;
+					}
+					// fallback: stringify
+					resolve(String(json));
+				} catch (e) {
+					reject(e);
+				}
+			});
+		});
+
+		req.on('error', err => reject(err));
+		req.write(payload);
+		req.end();
+	});
+}
+
 async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 	const gitignorePath = path.join(repoRoot, '.gitignore');
 	let existing = '';
