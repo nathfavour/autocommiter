@@ -1,8 +1,8 @@
 import { exec } from 'child_process';
 import * as fs from 'fs';
+import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
-import * as https from 'https';
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
@@ -49,7 +49,9 @@ async function getOrPromptApiKey(context: vscode.ExtensionContext): Promise<stri
 	const keyId = 'autocommiter.apiKey';
 	try {
 		const existing = await context.secrets.get(keyId);
-		if (existing) return existing;
+		if (existing) {
+			return existing;
+		}
 	} catch {}
 
 	const entered = await vscode.window.showInputBox({
