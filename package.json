@@ -9,13 +9,20 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:autocommiter.generateMessage"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "autocommiter.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "autocommiter.generateMessage",
+        "title": "Autocommiter: Generate commit message"
       }
     ]
   },
