@@ -7,6 +7,8 @@ import * as path from 'path';
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 
+import changesSummarizer from './changesSummarizer';
+
 // Minimal Git types for the built-in Git extension API we consume
 interface GitExtension {
 	getAPI(version: number): GitAPI;
@@ -354,8 +356,11 @@ export function activate(context: vscode.ExtensionContext) {
 							const apiKey = await getOrPromptApiKey(context);
 							if (apiKey) {
 								// Build a concise prompt including staged filenames
-								const stagedList = staged.split(/\r?\n/).filter(s => s).slice(0, 50).join('\n');
-								const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${stagedList}`;
+								// Build per-file changes and a compressed JSON payload (<=400 chars) to include with the prompt
+								const fileChanges = await changesSummarizer.buildFileChanges(cwd);
+								const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
+								const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
+								const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
 								const aiResult = await callInferenceApi(apiKey, userPrompt);
 								if (aiResult && aiResult.trim().length > 0) {
 									message = aiResult.trim();
