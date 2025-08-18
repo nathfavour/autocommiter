@@ -1,71 +1,100 @@
-# autocommiter README
+# Autocommiter
 
-This is the README for your extension "autocommiter". After writing up a brief description, we recommend including the following sections.
+Autocommiter is a small VS Code extension prototype that helps you generate commit messages from the Source Control (SCM) view. It provides a small "wand" action in the SCM view title and a status-bar button that inserts a generated commit message into the Git commit input box.
+
+This project is an early prototype focusing on a lightweight, non-invasive UX: it uses the built-in Git extension when possible to read and set the commit input, and falls back to copying the message to clipboard if necessary.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- Generate a commit message and insert it into the SCM commit input.
+- Status bar button (🪄) to trigger message generation.
+- Small toolbar action in the Source Control view title for quick access.
+- Lightweight prototype generator with a clear hook to add LLM/GitHub/Copilot integrations.
 
-For example if there is an image subfolder under your extension project workspace:
+## Usage
 
-\!\[feature X\]\(images/feature-x.png\)
+1. Open a repository in VS Code and make some changes (staged or unstaged).
+2. Open the Source Control view (Ctrl+Shift+G / Cmd+Shift+G).
+3. Click the status bar wand (right side) or the wand in the Source Control view title to generate a commit message.
+4. The generated message will be inserted into the SCM commit input if VS Code's built-in Git extension is available. Otherwise it will be copied to the clipboard and you can paste it manually.
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+Tip: The current generator is a simple placeholder; see "Extending the generator" below to connect to an LLM or GitHub/Copilot.
 
-## Requirements
+## Development
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+Requirements
+- Node.js and pnpm (pnpm is used by this workspace)
+- VS Code
 
-## Extension Settings
+Run locally
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+1. Install dependencies:
 
-For example:
+```bash
+pnpm install
+```
 
-This extension contributes the following settings:
+2. Start the TypeScript and bundler watchers (the workspace already includes watch tasks):
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+```bash
+pnpm run watch
+```
 
-## Known Issues
+3. Open this project in VS Code and press F5 to launch an Extension Development Host. In the new window, open a Git workspace and try the wand button in Source Control.
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+Build and package
 
-## Release Notes
+```bash
+pnpm run package
+# or use `vsce package` if you prefer
+```
 
-Users appreciate release notes as you update your extension.
+Notes on typechecks
+- The project uses `tsconfig.json` with `skipLibCheck` and explicit `types` entries to avoid third-party ambient type issues during development.
 
-### 1.0.0
+## Code highlights
 
-Initial release of ...
+- `src/extension.ts` registers the command `autocommiter.generateMessage`, adds a status bar item, and attempts to use the `vscode.git` extension's API to read and write the `inputBox` value for the repository.
+- `generateMessageFromContext` is a minimal placeholder where richer generation logic should plug in.
 
-### 1.0.1
+## Extending the generator (recommended next steps)
 
-Fixed issue #.
+1. Use staged/unstaged diffs to build a richer prompt
+   - Use the Git extension API to enumerate changed files and produce a short summary of additions/deletions per file.
 
-### 1.1.0
+2. Integrate an LLM provider
+   - Add an extension setting to accept an API key (or use the `vscode.authentication` API to get GitHub credentials).
+   - Provide an option to choose between providers (OpenAI, Anthropic, local model, etc.).
+   - Send a concise prompt including the file list and small diffs to generate a high-quality commit message.
 
-Added features X, Y, and Z.
+3. Explore Copilot/GitHub integration
+   - Copilot integration is not a public API; however you can integrate with GitHub's REST API for repository context or use the user's authenticated GitHub token for richer context.
+
+4. UI polishing
+   - Replace the text status bar item with an icon-only button.
+   - Add settings for style (conventional commits, short/long, scope inclusion).
+
+## Security & privacy
+
+If you integrate a third-party LLM, make sure to:
+
+- Explicitly show in the extension settings when network calls are made and what data is sent.
+- Allow users to opt in/out of sending patch contents to external services.
+
+## Contributing
+
+Contributions are welcome. Open an issue or PR describing the feature you'd like to add.
+
+## License
+
+This project does not include a license by default. Add a LICENSE file if you want to make the code reusable.
 
 ---
 
-## Following extension guidelines
+If you'd like, I can now:
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+- Implement LLM integration (OpenAI/Anthropic) and add settings to store API keys securely.
+- Improve the generator to inspect diffs and produce conventional commit messages.
+- Add tests and CI configuration.
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Which should I do next?
