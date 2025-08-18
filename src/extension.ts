@@ -2,6 +2,7 @@ import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as https from 'https';
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
@@ -67,14 +68,22 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 		const p = toPosix(relPath);
 		for (const pat of lines) {
 			// direct compare
-			if (pat === p) return true;
+			if (pat === p) {
+				return true;
+			}
 			// directory pattern
-			if (pat.endsWith('/') && (p === pat.slice(0, -1) || p.startsWith(pat))) return true;
+			if (pat.endsWith('/')) {
+				if (p === pat.slice(0, -1) || p.startsWith(pat)) {
+					return true;
+				}
+			}
 			// try glob match
 			try {
 				const esc = pat.replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
 				const re = new RegExp('^' + esc + '$');
-				if (re.test(p)) return true;
+				if (re.test(p)) {
+					return true;
+				}
 			} catch {
 				// ignore bad patterns
 			}
@@ -88,14 +97,23 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 	for (const req of required) {
 		let found = false;
 		for (const l of lines) {
-			if (l === req) { found = true; break; }
+			if (l === req) {
+				found = true;
+				break;
+			}
 			// rough match using simple glob logic
 			try {
 				const esc = l.replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
-				if (new RegExp('^' + esc + '$').test(req)) { found = true; break; }
+				if (new RegExp('^' + esc + '$').test(req)) {
+					found = true;
+					break;
+				}
 			} catch {}
 		}
-		if (!found) toAppend.push(`# Added by Autocommiter: ensure ${req}`, req);
+		if (!found) {
+			toAppend.push(`# Added by Autocommiter: ensure ${req}`);
+			toAppend.push(req);
+		}
 	}
 
 	// Find nested .git directories, skipping ignored directories
@@ -108,19 +126,27 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 			const relPosix = toPosix(rel || '.');
 			if (isIgnored(relPosix)) {
 				// skip this directory entirely
-				if (e.isDirectory()) continue;
+				if (e.isDirectory()) {
+					continue;
+				}
 			}
 			if (e.isDirectory()) {
 				if (e.name === '.git') {
 					const parent = path.dirname(full);
 					const parentRel = toPosix(path.relative(repoRoot, parent));
 					// ignore the repo root .git
-					if (parentRel === '' || parentRel === '.') continue;
-					if (!nestedGitParents.includes(parentRel)) nestedGitParents.push(parentRel);
+					if (parentRel === '' || parentRel === '.') {
+						continue;
+					}
+					if (!nestedGitParents.includes(parentRel)) {
+						nestedGitParents.push(parentRel);
+					}
 					continue;
 				}
 				// recurse
-				try { walk(full); } catch {}
+				try {
+					walk(full);
+				} catch {}
 			}
 		}
 	}
@@ -140,15 +166,21 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 
 	// For each nested git parent, ensure it's not listed in gitmodules and not ignored already
 	for (const p of nestedGitParents) {
-		if (gitmodulePaths.includes(p)) continue;
-		if (isIgnored(p)) continue;
+		if (gitmodulePaths.includes(p)) {
+			continue;
+		}
+		if (isIgnored(p)) {
+			continue;
+		}
 		// As an extra safety check, cd into the directory and ensure it's not referenced in .gitmodules in that subrepo
 		try {
 			const subGitmodules = path.join(repoRoot, p, '.gitmodules');
 			if (fs.existsSync(subGitmodules)) {
 				const sub = fs.readFileSync(subGitmodules, 'utf8');
 				// if submodule config references back to this path, skip
-				if (sub.includes(p)) continue;
+				if (sub.includes(p)) {
+					continue;
+				}
 			}
 		} catch {}
 		toAppend.push(`# Added by Autocommiter: ignore nested repo ${p}`);
@@ -226,6 +258,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 				// 3) Try Copilot generator first
 				progress.report({ message: 'Generating commit message (Copilot preferred)…' });
+				let copilotFailed = false;
 				try {
 					const copilotResult = await vscode.commands.executeCommand('github.copilot.git.generateCommitMessage');
 					if (copilotResult && typeof copilotResult === 'string' && copilotResult.trim().length > 0) {
@@ -233,10 +266,33 @@ export function activate(context: vscode.ExtensionContext) {
 						vscode.window.showInformationMessage('Autocommit used Copilot to generate the commit message.');
 					}
 				} catch (e) {
-					// ignore and fall back
+					copilotFailed = true;
 				}
 
-				// 4) Fallback generator
+				// 4) If Copilot failed, offer to use a GitHub API key-based inference endpoint
+				if (!message && copilotFailed) {
+					const pick = await vscode.window.showInformationMessage('Copilot commit generation failed. Use an API key to generate commit message instead?', 'Use API key', 'Skip');
+					if (pick === 'Use API key') {
+						try {
+							const apiKey = await getOrPromptApiKey(context);
+							if (apiKey) {
+								// Build a concise prompt including staged filenames
+								const stagedList = staged.split(/\r?\n/).filter(s => s).slice(0, 50).join('\n');
+								const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${stagedList}`;
+								const aiResult = await callInferenceApi(apiKey, userPrompt);
+								if (aiResult && aiResult.trim().length > 0) {
+									message = aiResult.trim();
+									vscode.window.showInformationMessage('Autocommit used API key to generate the commit message.');
+								}
+							}
+						} catch (e) {
+							console.error('Autocommiter API generation failed', e);
+							vscode.window.showWarningMessage('API-based generation failed. Falling back to local generator.');
+						}
+					}
+				}
+
+				// 5) Fallback generator (local)
 				if (!message) {
 					const current = repo.inputBox.value || '';
 					message = await generateMessageFromContext(current, cwd);
