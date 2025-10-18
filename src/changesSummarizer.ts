@@ -79,47 +79,47 @@ export async function buildFileChanges(cwd: string): Promise<FileChange[]> {
  *  - Never return completely empty files array - always include at least one file entry.
  */
 export function compressToJson(fileChanges: FileChange[], maxLen = 400): string {
-	if (!fileChanges || fileChanges.length === 0) {
-		return JSON.stringify({ files: [] });
-	}
+  if (!fileChanges || fileChanges.length === 0) {
+    return JSON.stringify({ files: [] });
+  }
 
-	// Helper to serialize with given map function
-	const serialize = (arr: FileChange[], mapFn: (c: string, f: string) => string) => {
-		const items = arr.map(fc => `{\"f\":\"${escapeStr(fc.file)}\",\"c\":\"${escapeStr(mapFn(fc.change, fc.file))}\"}`);
-		return `{\"files\": [${items.join(',')}]}`;
-	};
+  // Helper to serialize with given map function
+  const serialize = (arr: FileChange[], mapFn: (c: string, f: string) => string) => {
+    const items = arr.map(fc => `{\"f\":\"${escapeStr(fc.file)}\",\"c\":\"${escapeStr(mapFn(fc.change, fc.file))}\"}`);
+    return `{\"files\": [${items.join(',')}]}`;
+  };
 
-	// escape basic quotes/backslashes
-	const escapeStr = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+  // escape basic quotes/backslashes
+  const escapeStr = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 
-	// tiered map functions
-	const maps: Array<(c: string, f: string) => string> = [];
-	maps.push((c) => c); // full
-	maps.push((c) => c.slice(0, 12)); // short
-	maps.push((c) => c.slice(0, 6));
-	maps.push((c) => c.slice(0, 3));
-	maps.push((c) => c.slice(0, 1));
+  // tiered map functions
+  const maps: Array<(c: string, f: string) => string> = [];
+  maps.push((c) => c); // full
+  maps.push((c) => c.slice(0, 12)); // short
+  maps.push((c) => c.slice(0, 6));
+  maps.push((c) => c.slice(0, 3));
+  maps.push((c) => c.slice(0, 1));
 
-	// Try progressively using maps, and if still too long, drop files from the end
-	// BUT KEEP AT LEAST 1 FILE
-	for (let m = 0; m < maps.length; m++) {
-		for (let keep = fileChanges.length; keep > 0; keep--) {
-			const arr = fileChanges.slice(0, keep);
-			const s = serialize(arr, maps[m]);
-			if (s.length <= maxLen) {
-				return s;
-			}
-		}
-	}
+  // Try progressively using maps, and if still too long, drop files from the end
+  // BUT KEEP AT LEAST 1 FILE
+  for (let m = 0; m < maps.length; m++) {
+    for (let keep = fileChanges.length; keep > 0; keep--) {
+      const arr = fileChanges.slice(0, keep);
+      const s = serialize(arr, maps[m]);
+      if (s.length <= maxLen) {
+        return s;
+      }
+    }
+  }
 
-	// As a last resort, ensure we return at least ONE file entry (minimal representation)
-	// This is critical to ensure the API doesn't think there are "no code changes"
-	const minimal = fileChanges.slice(0, 1).map(fc => ({
-		f: fc.file.split('/').pop() || fc.file, // just filename
-		c: 'mod' // minimal change indicator
-	}));
-	return JSON.stringify({ files: minimal });
-}export default {
+  // As a last resort, ensure we return at least ONE file entry (minimal representation)
+  // This is critical to ensure the API doesn't think there are "no code changes"
+  const minimal = fileChanges.slice(0, 1).map(fc => ({
+    f: fc.file.split('/').pop() || fc.file, // just filename
+    c: 'mod' // minimal change indicator
+  }));
+  return JSON.stringify({ files: minimal });
+} export default {
   getStagedFiles,
   analyzeFileChange,
   buildFileChanges,
