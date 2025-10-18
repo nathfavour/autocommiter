@@ -55,7 +55,7 @@ async function getOrPromptApiKey(context: vscode.ExtensionContext): Promise<stri
 		if (existing) {
 			return existing;
 		}
-	} catch {}
+	} catch { }
 
 	const entered = await vscode.window.showInputBox({
 		prompt: 'Enter GitHub API key (will be stored securely in VS Code SecretStorage)',
@@ -139,7 +139,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 	// Check if user has enabled gitignore updates
 	const config = vscode.workspace.getConfiguration('autocommiter');
 	const shouldUpdate = config.get<boolean>('updateGitignore', false);
-	
+
 	if (!shouldUpdate) {
 		console.log('Autocommiter: .gitignore updates disabled by user settings');
 		return;
@@ -208,7 +208,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 					found = true;
 					break;
 				}
-			} catch {}
+			} catch { }
 		}
 		if (!found) {
 			toAppend.push(`# Added by Autocommiter: ensure ${req}`);
@@ -246,7 +246,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 				// recurse
 				try {
 					walk(full);
-				} catch {}
+				} catch { }
 			}
 		}
 	}
@@ -262,7 +262,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 		while ((m = pathRe.exec(gm)) !== null) {
 			gitmodulePaths.push(toPosix(m[1].trim()));
 		}
-	} catch {}
+	} catch { }
 
 	// For each nested git parent, ensure it's not listed in gitmodules and not ignored already
 	for (const p of nestedGitParents) {
@@ -282,7 +282,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 					continue;
 				}
 			}
-		} catch {}
+		} catch { }
 		toAppend.push(`# Added by Autocommiter: ignore nested repo ${p}`);
 		toAppend.push(p + '/');
 	}
@@ -344,7 +344,7 @@ export function activate(context: vscode.ExtensionContext) {
 				// 1) Stage all changes
 				// Safety: ensure .gitignore has protections before staging
 				progress.report({ message: 'Ensuring .gitignore safety…' });
-				try { await ensureGitignoreSafety(cwd); } catch {}
+				try { await ensureGitignoreSafety(cwd); } catch { }
 				progress.report({ message: 'Staging changes (git add .)…' });
 				await runGitCommand('git add .', cwd);
 
@@ -425,7 +425,7 @@ export function activate(context: vscode.ExtensionContext) {
 					vscode.window.showInformationMessage('Autocommit committed changes locally.');
 				} finally {
 					// best-effort cleanup
-					try { fs.unlinkSync(tmpFile); } catch {}
+					try { fs.unlinkSync(tmpFile); } catch { }
 				}
 
 				// 6) Push
@@ -458,7 +458,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() { }
 
 // Very small heuristic generator — placeholder for integrating with GitHub/Copilot APIs.
 async function generateMessageFromContext(currentInput: string, repoRoot?: string): Promise<string> {
