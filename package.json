@@ -4,7 +4,7 @@
   "description": "auto commit messages using github",
   "repository": "https://github.com/nathfavour/autocommiter",
   "publisher": "nathfavour",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.94.0"
   },
