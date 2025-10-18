@@ -135,6 +135,15 @@ function callInferenceApi(apiKey: string, userPrompt: string): Promise<string> {
 }
 
 async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
+	// Check if user has enabled gitignore updates
+	const config = vscode.workspace.getConfiguration('autocommiter');
+	const shouldUpdate = config.get<boolean>('updateGitignore', false);
+	
+	if (!shouldUpdate) {
+		console.log('Autocommiter: .gitignore updates disabled by user settings');
+		return;
+	}
+
 	const gitignorePath = path.join(repoRoot, '.gitignore');
 	let existing = '';
 	try {
@@ -180,8 +189,9 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 		return false;
 	};
 
-	// Ensure env/docx patterns
-	const required = ['*.env*', '.env*', 'docx/', '.docx/'];
+	// Get patterns from settings
+	const configPatterns = config.get<string[]>('gitignorePatterns', ['*.env*', '.env*', 'docx/', '.docx/']);
+	const required = configPatterns;
 	const toAppend: string[] = [];
 	for (const req of required) {
 		let found = false;
