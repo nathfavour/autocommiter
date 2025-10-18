@@ -4,21 +4,22 @@ import * as https from 'https';
 export interface ModelInfo {
     id: string;
     name: string;
-    status: 'available' | 'preview' | 'experimental';
+    friendly_name?: string;
+    publisher?: string;
+    summary?: string;
+    task?: string;
+    tags?: string[];
 }
 
+// Curated list of common chat-completion models for defaults
 const DEFAULT_MODELS: ModelInfo[] = [
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Fast & Cost-effective)', status: 'available' },
-    { id: 'gpt-4o', name: 'GPT-4o (High Quality)', status: 'available' },
-    { id: 'Meta-Llama-3.1-405B-Instruct', name: 'Meta Llama 3.1 405B', status: 'available' },
-    { id: 'Meta-Llama-3.1-70B-Instruct', name: 'Meta Llama 3.1 70B', status: 'available' },
-    { id: 'Mistral-large', name: 'Mistral Large', status: 'available' },
-    { id: 'Mistral-small', name: 'Mistral Small', status: 'available' },
-    { id: 'Cohere-command-r-plus', name: 'Cohere Command R+', status: 'available' },
-];
-
-/**
+    { id: 'gpt-4o-mini', name: 'gpt-4o-mini', friendly_name: 'OpenAI GPT-4o mini', summary: 'Fast & cost-effective, great for most tasks', publisher: 'Azure OpenAI Service' },
+    { id: 'gpt-4o', name: 'gpt-4o', friendly_name: 'OpenAI GPT-4o', summary: 'High quality, most capable model', publisher: 'Azure OpenAI Service' },
+    { id: 'Phi-3-mini-128k-instruct', name: 'Phi-3-mini-128k-instruct', friendly_name: 'Phi-3 mini 128k', summary: 'Lightweight, efficient open model', publisher: 'Microsoft' },
+    { id: 'Mistral-large', name: 'Mistral-large', friendly_name: 'Mistral Large', summary: 'Powerful open-source model', publisher: 'Mistral AI' },
+];/**
  * Fetch available models from GitHub Models API
+ * API returns array of models directly (not wrapped in .data)
  */
 export async function fetchAvailableModels(apiKey: string): Promise<ModelInfo[]> {
     return new Promise((resolve, reject) => {
@@ -28,7 +29,9 @@ export async function fetchAvailableModels(apiKey: string): Promise<ModelInfo[]>
             hostname: url.hostname,
             path: url.pathname,
             headers: {
-                'Authorization': `Bearer ${apiKey}`
+                'Accept': 'application/vnd.github+json',
+                'Authorization': `Bearer ${apiKey}`,
+                'X-GitHub-Api-Version': '2022-11-28'
             }
         };
 
@@ -38,13 +41,18 @@ export async function fetchAvailableModels(apiKey: string): Promise<ModelInfo[]>
             res.on('end', () => {
                 try {
                     const json = JSON.parse(body);
-                    if (json.data && Array.isArray(json.data)) {
-                        const models = json.data
-                            .filter((m: any) => m.id && m.status)
+                    // API returns array directly
+                    if (Array.isArray(json)) {
+                        const models = json
+                            .filter((m: any) => m.id && m.name && m.task === 'chat-completion')
                             .map((m: any) => ({
-                                id: m.id,
-                                name: m.id,
-                                status: m.status as 'available' | 'preview' | 'experimental'
+                                id: m.name, // Use 'name' field as the model ID for API calls
+                                name: m.name,
+                                friendly_name: m.friendly_name || m.name,
+                                publisher: m.publisher,
+                                summary: m.summary,
+                                task: m.task,
+                                tags: m.tags
                             }));
                         resolve(models);
                     } else {
@@ -52,6 +60,7 @@ export async function fetchAvailableModels(apiKey: string): Promise<ModelInfo[]>
                     }
                 } catch (e) {
                     // If parsing fails, return defaults
+                    console.error('Autocommiter: failed to parse models response', e);
                     resolve(DEFAULT_MODELS);
                 }
             });
@@ -59,6 +68,7 @@ export async function fetchAvailableModels(apiKey: string): Promise<ModelInfo[]>
 
         req.on('error', err => {
             // On network error, return defaults
+            console.error('Autocommiter: failed to fetch models', err);
             resolve(DEFAULT_MODELS);
         });
         req.end();
@@ -124,13 +134,11 @@ export async function showModelSelectionPicker(
     const currentModelId = getSelectedModelId(context);
 
     const items = models.map(m => ({
-        label: m.id,
-        description: m.name,
-        detail: `Status: ${m.status}${m.id === currentModelId ? ' (Currently Selected)' : ''}`,
+        label: m.name,
+        description: m.friendly_name || m.name,
+        detail: `${m.summary || ''}${m.id === currentModelId ? ' (Currently Selected)' : ''}`.trim(),
         modelInfo: m
-    }));
-
-    const pick = await vscode.window.showQuickPick(items, {
+    })); const pick = await vscode.window.showQuickPick(items, {
         placeHolder: 'Select a model for this commit message',
         matchOnDescription: true,
         matchOnDetail: true

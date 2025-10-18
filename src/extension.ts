@@ -92,7 +92,9 @@ function callInferenceApi(apiKey: string, userPrompt: string, model: string = 'g
 			headers: {
 				'Content-Type': 'application/json',
 				'Content-Length': Buffer.byteLength(payload),
-				'Authorization': `Bearer ${apiKey}`
+				'Authorization': `Bearer ${apiKey}`,
+				'Accept': 'application/vnd.github+json',
+				'X-GitHub-Api-Version': '2022-11-28'
 			}
 		};
 
