@@ -9,16 +9,44 @@ This project is an early prototype focusing on a lightweight, non-invasive UX: i
 - Generate a commit message and insert it into the SCM commit input.
 - Status bar button (🪄) to trigger message generation.
 - Small toolbar action in the Source Control view title for quick access.
+- **Try Copilot first**: Uses GitHub Copilot's built-in commit message generation if available.
+- **Intelligent API fallback**: When Copilot isn't available, uses GitHub Models API with automatic model detection and selection.
+- **Model selection UI**: Choose from available models with one-time or persistent selection.
+- **Automatic model caching**: Caches available models for fast model selection without extra network calls.
 - Lightweight prototype generator with a clear hook to add LLM/GitHub/Copilot integrations.
 
 ## Usage
 
+### Basic Usage
+
 1. Open a repository in VS Code and make some changes (staged or unstaged).
 2. Open the Source Control view (Ctrl+Shift+G / Cmd+Shift+G).
 3. Click the status bar wand (right side) or the wand in the Source Control view title to generate a commit message.
-4. The generated message will be inserted into the SCM commit input if VS Code's built-in Git extension is available. Otherwise it will be copied to the clipboard and you can paste it manually.
+4. The generated message will be inserted into the SCM commit input if VS Code's built-in Git extension is available.
 
-Tip: The current generator is a simple placeholder; see "Extending the generator" below to connect to an LLM or GitHub/Copilot.
+### With GitHub Models API
+
+When Copilot is not available, the extension can use the GitHub Models API to generate commit messages:
+
+1. **First time setup**: The extension will prompt you for a GitHub API token (stored securely in VS Code).
+2. **Model selection**: On first API usage, you'll be prompted to select a model. Choose one of:
+   - `gpt-4o-mini` (fast and cost-effective, default)
+   - `gpt-4o` (high quality)
+   - `Meta-Llama-3.1-70B-Instruct` or other open models
+   - Other available models in GitHub Models catalog
+
+3. **Save your choice**: After selecting, you can:
+   - **Use for this commit only**: Model selection won't persist.
+   - **Save as default**: Your choice will be remembered and used for all future commits (unless changed in settings).
+
+### Configuration
+
+Open VS Code Settings and search for "Autocommiter" to find:
+
+- **`autocommiter.selectedModel`**: Set your default AI model (e.g., `gpt-4o-mini`, `gpt-4o`, `Meta-Llama-3.1-70B-Instruct`)
+- **`autocommiter.autoUpdateModels`**: Auto-refresh available models from the API (default: `true`)
+- **`autocommiter.updateGitignore`** (optional): Automatically update `.gitignore` to protect sensitive files (default: `false`)
+- **`autocommiter.gitignorePatterns`** (optional): Patterns to add to `.gitignore` when protection is enabled
 
 ## Development
 
@@ -55,6 +83,7 @@ Notes on typechecks
 ## Code highlights
 
 - `src/extension.ts` registers the command `autocommiter.generateMessage`, adds a status bar item, and attempts to use the `vscode.git` extension's API to read and write the `inputBox` value for the repository.
+- `src/modelManager.ts` handles model fetching, caching, and selection UI for GitHub Models API.
 - `generateMessageFromContext` is a minimal placeholder where richer generation logic should plug in.
 
 ## Extending the generator (recommended next steps)
@@ -62,24 +91,18 @@ Notes on typechecks
 1. Use staged/unstaged diffs to build a richer prompt
    - Use the Git extension API to enumerate changed files and produce a short summary of additions/deletions per file.
 
-2. Integrate an LLM provider
-   - Add an extension setting to accept an API key (or use the `vscode.authentication` API to get GitHub credentials).
-   - Provide an option to choose between providers (OpenAI, Anthropic, local model, etc.).
-   - Send a concise prompt including the file list and small diffs to generate a high-quality commit message.
+2. Customize commit message style
+   - Add extension settings for conventional commits, scope inclusion, etc.
 
-3. Explore Copilot/GitHub integration
-   - Copilot integration is not a public API; however you can integrate with GitHub's REST API for repository context or use the user's authenticated GitHub token for richer context.
-
-4. UI polishing
+3. UI polishing
    - Replace the text status bar item with an icon-only button.
-   - Add settings for style (conventional commits, short/long, scope inclusion).
+   - Add more commit message style templates.
 
 ## Security & privacy
 
-If you integrate a third-party LLM, make sure to:
-
-- Explicitly show in the extension settings when network calls are made and what data is sent.
-- Allow users to opt in/out of sending patch contents to external services.
+- API keys are stored securely in VS Code's SecretStorage.
+- File diffs are compressed and sent to GitHub Models API for message generation.
+- No data is stored on extension or external services beyond the API call itself.
 
 ## Contributing
 
@@ -88,13 +111,3 @@ Contributions are welcome. Open an issue or PR describing the feature you'd like
 ## License
 
 This project does not include a license by default. Add a LICENSE file if you want to make the code reusable.
-
----
-
-If you'd like, I can now:
-
-- Implement LLM integration (OpenAI/Anthropic) and add settings to store API keys securely.
-- Improve the generator to inspect diffs and produce conventional commit messages.
-- Add tests and CI configuration.
-
-Which should I do next?
