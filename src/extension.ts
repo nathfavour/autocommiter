@@ -389,7 +389,20 @@ export function activate(context: vscode.ExtensionContext) {
 								const fileChanges = await changesSummarizer.buildFileChanges(cwd);
 								const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
 								const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
-								const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
+								
+								// Guard: ensure we have file context for the AI
+								const fileCount = fileChanges.length;
+								let userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}`;
+								if (fileCount > 50) {
+									userPrompt += `\n(... and ${fileCount - 50} more files)`;
+								}
+								userPrompt += `\n\nSummaryJSON:${compressedJson}`;
+								
+								// Debug logging to diagnose no-op message issues
+								if (compressedJson.includes('"files":[]') || compressedJson.includes('"files": []')) {
+									console.warn('Autocommiter: Warning - file summary is empty, may cause generic commit message. Files:', fileCount);
+								}
+								
 								try {
 									const aiResult = await callInferenceApi(apiKey, userPrompt, selectedModel);
 									if (aiResult && aiResult.trim().length > 0) {
