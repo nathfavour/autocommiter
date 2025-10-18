@@ -34,6 +34,29 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Autocommiter",
+      "properties": {
+        "autocommiter.updateGitignore": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically update .gitignore to protect sensitive files (.env*, docx/) and nested repositories"
+        },
+        "autocommiter.gitignorePatterns": {
+          "type": "array",
+          "default": [
+            "*.env*",
+            ".env*",
+            "docx/",
+            ".docx/"
+          ],
+          "description": "Patterns to add to .gitignore when updateGitignore is enabled",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "scripts": {

@@ -110,8 +110,18 @@ function callInferenceApi(apiKey: string, userPrompt: string): Promise<string> {
 						resolve(String(json.output[0].content[0].text));
 						return;
 					}
-					// fallback: stringify
-					resolve(String(json));
+					// Additional fallback: try to extract any text-like content
+					if (typeof json === 'string') {
+						resolve(json);
+						return;
+					}
+					// Check for error response
+					if (json.error) {
+						reject(new Error(`API Error: ${json.error.message || JSON.stringify(json.error)}`));
+						return;
+					}
+					// Last resort: if we still have no content, reject instead of returning [object Object]
+					reject(new Error(`Unexpected API response format: ${JSON.stringify(json).slice(0, 200)}`));
 				} catch (e) {
 					reject(e);
 				}
@@ -361,18 +371,23 @@ export function activate(context: vscode.ExtensionContext) {
 							const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
 							const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
 							const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
-							const aiResult = await callInferenceApi(apiKey, userPrompt);
-							if (aiResult && aiResult.trim().length > 0) {
-								message = aiResult.trim();
-								vscode.window.showInformationMessage('Autocommit used API key to generate the commit message.');
+							try {
+								const aiResult = await callInferenceApi(apiKey, userPrompt);
+								if (aiResult && aiResult.trim().length > 0) {
+									message = aiResult.trim();
+									vscode.window.showInformationMessage('Autocommit used API key to generate the commit message.');
+								}
+							} catch (apiErr) {
+								console.error('Autocommiter API call failed', apiErr);
+								vscode.window.showWarningMessage(`API-based generation failed: ${(apiErr as Error)?.message ?? String(apiErr)}. Falling back to local generator.`);
 							}
 						} else {
 							// no key available; skip silently and fall back to local generator
 							console.log('Autocommiter: no API key available, skipping API fallback.');
 						}
 					} catch (e) {
-						console.error('Autocommiter API generation failed', e);
-						vscode.window.showWarningMessage('API-based generation failed. Falling back to local generator.');
+						console.error('Autocommiter API key retrieval failed', e);
+						vscode.window.showWarningMessage('Failed to retrieve API key. Falling back to local generator.');
 					}
 				}
 
