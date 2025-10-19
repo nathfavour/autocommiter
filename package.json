@@ -2,6 +2,7 @@
   "name": "autocommiterr",
   "displayName": "autocommiter copilot",
   "description": "auto commit messages using github",
+  "icon": "public/icon.jpg",
   "repository": "https://github.com/nathfavour/autocommiter",
   "publisher": "nathfavour",
   "version": "0.0.1",
