@@ -74,14 +74,14 @@ async function getOrPromptApiKey(context: vscode.ExtensionContext): Promise<stri
 	return undefined;
 }
 
-function callInferenceApi(apiKey: string, userPrompt: string): Promise<string> {
+function callInferenceApi(apiKey: string, userPrompt: string, model: string): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const payload = JSON.stringify({
 			messages: [
 				{ role: 'system', content: 'You are a helpful assistant.' },
 				{ role: 'user', content: userPrompt }
 			],
-			model: 'openai/gpt-4.1'
+			model: model
 		});
 
 		const url = new URL('https://models.inference.ai.azure.com/chat/completions');
@@ -377,20 +377,26 @@ export function activate(context: vscode.ExtensionContext) {
 						const apiKey = await getOrPromptApiKey(context);
 						// If user didn't provide a key (they cancelled the prompt), abandon the API fallback silently
 						if (apiKey) {
-							// Build per-file changes and a compressed JSON payload (<=400 chars) to include with the prompt
-							const fileChanges = await changesSummarizer.buildFileChanges(cwd);
-							const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
-							const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
-							const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
-							try {
-								const aiResult = await callInferenceApi(apiKey, userPrompt);
-								if (aiResult && aiResult.trim().length > 0) {
-									message = aiResult.trim();
-									vscode.window.showInformationMessage('Autocommit used API key to generate the commit message.');
+							// Get the model to use from settings/cache
+							const selectedModel = await getModelForApi(context, apiKey);
+							if (!selectedModel) {
+								console.log('Autocommiter: no model selected, skipping API fallback.');
+							} else {
+								// Build per-file changes and a compressed JSON payload (<=400 chars) to include with the prompt
+								const fileChanges = await changesSummarizer.buildFileChanges(cwd);
+								const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
+								const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
+								const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
+								try {
+									const aiResult = await callInferenceApi(apiKey, userPrompt, selectedModel);
+									if (aiResult && aiResult.trim().length > 0) {
+										message = aiResult.trim();
+										vscode.window.showInformationMessage(`Autocommit used ${selectedModel} to generate the commit message.`);
+									}
+								} catch (apiErr) {
+									console.error('Autocommiter API call failed', apiErr);
+									vscode.window.showWarningMessage(`API-based generation failed: ${(apiErr as Error)?.message ?? String(apiErr)}. Falling back to local generator.`);
 								}
-							} catch (apiErr) {
-								console.error('Autocommiter API call failed', apiErr);
-								vscode.window.showWarningMessage(`API-based generation failed: ${(apiErr as Error)?.message ?? String(apiErr)}. Falling back to local generator.`);
 							}
 						} else {
 							// no key available; skip silently and fall back to local generator
