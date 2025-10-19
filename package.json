@@ -5,7 +5,7 @@
   "icon": "public/icon.jpg",
   "repository": "https://github.com/nathfavour/autocommiter",
   "publisher": "nathfavour",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "engines": {
     "vscode": "^1.94.0"
   },
@@ -25,6 +25,16 @@
       {
         "command": "autocommiter.generateMessage",
         "title": "Autocommit"
+      },
+      {
+        "command": "autocommiter.refreshModels",
+        "title": "Autocommiter: Refresh Models",
+        "description": "Fetch and cache available models from GitHub Models API"
+      },
+      {
+        "command": "autocommiter.selectModel",
+        "title": "Autocommiter: Select Model",
+        "description": "Choose your preferred AI model for commit message generation"
       }
     ],
     "menus": {
@@ -39,6 +49,11 @@
     "configuration": {
       "title": "Autocommiter",
       "properties": {
+        "autocommiter.selectedModel": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "Default AI model to use for commit message generation (e.g., 'gpt-4o-mini', 'gpt-4o', 'Meta-Llama-3.1-70B-Instruct'). Use 'Autocommiter: Select Model' command to change."
+        },
         "autocommiter.updateGitignore": {
           "type": "boolean",
           "default": false,

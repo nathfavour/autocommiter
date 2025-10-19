@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import changesSummarizer from './changesSummarizer';
+import { getModelForApi, refreshModelList } from './modelManager';
 
 // Minimal Git types for the built-in Git extension API we consume
 interface GitExtension {
@@ -54,7 +55,7 @@ async function getOrPromptApiKey(context: vscode.ExtensionContext): Promise<stri
 		if (existing) {
 			return existing;
 		}
-	} catch {}
+	} catch { }
 
 	const entered = await vscode.window.showInputBox({
 		prompt: 'Enter GitHub API key (will be stored securely in VS Code SecretStorage)',
@@ -138,7 +139,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 	// Check if user has enabled gitignore updates
 	const config = vscode.workspace.getConfiguration('autocommiter');
 	const shouldUpdate = config.get<boolean>('updateGitignore', false);
-	
+
 	if (!shouldUpdate) {
 		console.log('Autocommiter: .gitignore updates disabled by user settings');
 		return;
@@ -207,7 +208,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 					found = true;
 					break;
 				}
-			} catch {}
+			} catch { }
 		}
 		if (!found) {
 			toAppend.push(`# Added by Autocommiter: ensure ${req}`);
@@ -245,7 +246,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 				// recurse
 				try {
 					walk(full);
-				} catch {}
+				} catch { }
 			}
 		}
 	}
@@ -261,7 +262,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 		while ((m = pathRe.exec(gm)) !== null) {
 			gitmodulePaths.push(toPosix(m[1].trim()));
 		}
-	} catch {}
+	} catch { }
 
 	// For each nested git parent, ensure it's not listed in gitmodules and not ignored already
 	for (const p of nestedGitParents) {
@@ -281,7 +282,7 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 					continue;
 				}
 			}
-		} catch {}
+		} catch { }
 		toAppend.push(`# Added by Autocommiter: ignore nested repo ${p}`);
 		toAppend.push(p + '/');
 	}
@@ -343,7 +344,7 @@ export function activate(context: vscode.ExtensionContext) {
 				// 1) Stage all changes
 				// Safety: ensure .gitignore has protections before staging
 				progress.report({ message: 'Ensuring .gitignore safety…' });
-				try { await ensureGitignoreSafety(cwd); } catch {}
+				try { await ensureGitignoreSafety(cwd); } catch { }
 				progress.report({ message: 'Staging changes (git add .)…' });
 				await runGitCommand('git add .', cwd);
 
@@ -416,7 +417,7 @@ export function activate(context: vscode.ExtensionContext) {
 					vscode.window.showInformationMessage('Autocommit committed changes locally.');
 				} finally {
 					// best-effort cleanup
-					try { fs.unlinkSync(tmpFile); } catch {}
+					try { fs.unlinkSync(tmpFile); } catch { }
 				}
 
 				// 6) Push
@@ -439,6 +440,52 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(generateDisposable);
 
+	// Refresh models command (fetches from API and caches)
+	const refreshModelsDisposable = vscode.commands.registerCommand('autocommiter.refreshModels', async () => {
+		try {
+			const apiKey = await getOrPromptApiKey(context);
+			if (!apiKey) {
+				vscode.window.showWarningMessage('API key is required to fetch models. Please provide it when prompted.');
+				return;
+			}
+
+			vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Autocommiter: Fetching models…' }, async (progress) => {
+				progress.report({ message: 'Fetching available models from GitHub Models API…' });
+				const result = await refreshModelList(context, apiKey);
+
+				if (result.success) {
+					vscode.window.showInformationMessage(`✓ ${result.message}`);
+				} else {
+					vscode.window.showErrorMessage(`✗ ${result.message}`);
+				}
+			});
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			vscode.window.showErrorMessage(`Failed to refresh models: ${msg}`);
+		}
+	});
+	context.subscriptions.push(refreshModelsDisposable);
+
+	// Select model command (shows model picker UI)
+	const selectModelDisposable = vscode.commands.registerCommand('autocommiter.selectModel', async () => {
+		try {
+			const apiKey = await getOrPromptApiKey(context);
+			if (!apiKey) {
+				vscode.window.showWarningMessage('API key is required to select a model. Please provide it when prompted.');
+				return;
+			}
+
+			const selection = await getModelForApi(context, apiKey, true);
+			if (selection) {
+				vscode.window.showInformationMessage(`✓ Model selected: ${selection}`);
+			}
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			vscode.window.showErrorMessage(`Failed to select model: ${msg}`);
+		}
+	});
+	context.subscriptions.push(selectModelDisposable);
+
 	// Status bar item (wand emoji) placed near the right
 	const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	status.text = '🪄 Autocommit';
@@ -449,7 +496,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() { }
 
 // Very small heuristic generator — placeholder for integrating with GitHub/Copilot APIs.
 async function generateMessageFromContext(currentInput: string, repoRoot?: string): Promise<string> {

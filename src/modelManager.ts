@@ -112,24 +112,15 @@ export async function setSelectedModelId(modelId: string): Promise<void> {
 }
 
 /**
- * Show model selection quick pick
+ * Show model selection quick pick (uses cached models only)
  */
 export async function showModelSelectionPicker(
     context: vscode.ExtensionContext,
     apiKey: string,
     allowPersist: boolean = true
 ): Promise<{ modelId: string; persistent: boolean } | undefined> {
-    try {
-        // Fetch fresh models from API
-        const freshModels = await fetchAvailableModels(apiKey);
-        if (freshModels.length > 0) {
-            await updateCachedModels(context, freshModels);
-        }
-    } catch (e) {
-        // Use cached models if fetch fails
-        console.log('Autocommiter: could not fetch fresh models, using cached');
-    }
-
+    // Use only cached models; don't fetch automatically
+    // User should refresh via 'Autocommiter: Refresh Models' command if needed
     const models = getCachedModels(context);
     const currentModelId = getSelectedModelId(context);
 
@@ -179,23 +170,44 @@ export async function showModelSelectionPicker(
 }
 
 /**
- * Get the model to use for API calls (with automatic selection flow if needed)
+ * Fetch and cache available models (for manual refresh via command palette)
+ */
+export async function refreshModelList(context: vscode.ExtensionContext, apiKey: string): Promise<{ success: boolean; message: string; count?: number }> {
+    try {
+        const freshModels = await fetchAvailableModels(apiKey);
+        if (freshModels.length > 0) {
+            await updateCachedModels(context, freshModels);
+            return {
+                success: true,
+                message: `Successfully fetched and cached ${freshModels.length} models`,
+                count: freshModels.length
+            };
+        } else {
+            return {
+                success: false,
+                message: 'No chat-completion models found in the API response'
+            };
+        }
+    } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        return {
+            success: false,
+            message: `Failed to fetch models: ${errorMsg}`
+        };
+    }
+}
+
+/**
+ * Get the model to use for API calls (without automatic fetching)
+ * User must manually refresh models via command palette
  */
 export async function getModelForApi(
     context: vscode.ExtensionContext,
     apiKey: string,
     forceSelection: boolean = false
 ): Promise<string | undefined> {
-    // First, try to update the model list
-    try {
-        const freshModels = await fetchAvailableModels(apiKey);
-        if (freshModels.length > 0) {
-            await updateCachedModels(context, freshModels);
-        }
-    } catch (e) {
-        // Use cached models if fetch fails
-        console.log('Autocommiter: could not fetch fresh models, using cached');
-    }
+    // Don't auto-fetch; rely on cached models
+    // User controls refresh manually via command palette
 
     const selectedModelId = getSelectedModelId(context);
 
