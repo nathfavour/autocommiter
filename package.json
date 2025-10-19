@@ -4,7 +4,7 @@
   "description": "auto commit messages using github",
   "repository": "https://github.com/nathfavour/autocommiter",
   "publisher": "nathfavour",
-  "version": "1.0.1",
+  "version": "0.0.1",
   "engines": {
     "vscode": "^1.94.0"
   },
@@ -55,16 +55,6 @@
           "items": {
             "type": "string"
           }
-        },
-        "autocommiter.selectedModel": {
-          "type": "string",
-          "default": "gpt-4o-mini",
-          "description": "The default AI model to use for generating commit messages. Examples: gpt-4o-mini, gpt-4o, Meta-Llama-3.1-70B-Instruct, Mistral-large"
-        },
-        "autocommiter.autoUpdateModels": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically refresh the list of available models from the API when using model selection"
         }
       }
     }
