@@ -13,6 +13,7 @@ This project is an early prototype focusing on a lightweight, non-invasive UX: i
 - **Intelligent API fallback**: When Copilot isn't available, uses GitHub Models API with automatic model detection and selection.
 - **Model selection UI**: Choose from available models with one-time or persistent selection.
 - **Automatic model caching**: Caches available models for fast model selection without extra network calls.
+- **Gitmoji support** (opt-in): Intelligently adds gitmoji prefixes to commit messages based on content matching.
 - Lightweight prototype generator with a clear hook to add LLM/GitHub/Copilot integrations.
 
 ## Usage
@@ -44,7 +45,7 @@ When Copilot is not available, the extension can use the GitHub Models API to ge
 Open VS Code Settings and search for "Autocommiter" to find:
 
 - **`autocommiter.selectedModel`**: Set your default AI model (e.g., `gpt-4o-mini`, `gpt-4o`, `Meta-Llama-3.1-70B-Instruct`)
-- **`autocommiter.autoUpdateModels`**: Auto-refresh available models from the API (default: `true`)
+- **`autocommiter.enableGitmoji`** (optional): Enable gitmoji prefixes for commit messages (default: `false`)
 - **`autocommiter.updateGitignore`** (optional): Automatically update `.gitignore` to protect sensitive files (default: `false`)
 - **`autocommiter.gitignorePatterns`** (optional): Patterns to add to `.gitignore` when protection is enabled
 

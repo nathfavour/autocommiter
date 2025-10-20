@@ -9,6 +9,7 @@ import * as vscode from 'vscode';
 
 import changesSummarizer from './changesSummarizer';
 import { getModelForApi, refreshModelList } from './modelManager';
+import { getGitmojifiedMessage, isGitmojEnabled } from './gitmoji';
 
 // Minimal Git types for the built-in Git extension API we consume
 interface GitExtension {
@@ -412,6 +413,12 @@ export function activate(context: vscode.ExtensionContext) {
 				if (!message) {
 					const current = repo.inputBox.value || '';
 					message = await generateMessageFromContext(current, cwd);
+				}
+
+				// Apply gitmoji if enabled
+				const config = vscode.workspace.getConfiguration('autocommiter');
+				if (isGitmojEnabled(config)) {
+					message = getGitmojifiedMessage(message);
 				}
 
 				// 5) Commit using temp file to avoid quoting issues
