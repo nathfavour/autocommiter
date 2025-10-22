@@ -12,3 +12,4 @@ node_modules
 docx/
 # Added by Autocommiter: ensure .docx/
 .docx/
+target/
