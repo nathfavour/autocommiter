@@ -35,6 +35,11 @@
         "command": "autocommiter.selectModel",
         "title": "Autocommiter: Select Model",
         "description": "Choose your preferred AI model for commit message generation"
+      },
+      {
+        "command": "autocommiter.selectRepos",
+        "title": "Autocommiter: Select Repositories",
+        "description": "Choose which repositories to track for autocommit"
       }
     ],
     "menus": {

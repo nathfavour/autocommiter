@@ -26,10 +26,15 @@ interface GitRepository {
 	inputBox: { value: string };
 	rootUri: vscode.Uri;
 	state?: RepositoryState;
+	add(resources: vscode.Uri[]): Promise<void>;
+	commit(message: string): Promise<void>;
+	push(): Promise<void>;
 }
 
 interface GitAPI {
 	repositories: GitRepository[];
+	onDidOpenRepository: vscode.Event<GitRepository>;
+	onDidCloseRepository: vscode.Event<GitRepository>;
 }
 
 function runGitCommand(cmd: string, cwd: string): Promise<string> {
@@ -316,142 +321,197 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(helloDisposable);
 
+	const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
+	const api = gitExt?.getAPI(1);
+
+	// Helper to get repositories to process
+	async function getTrackedRepositories(): Promise<GitRepository[]> {
+		if (!api) {
+			return [];
+		}
+		const allRepos = api.repositories;
+		const trackedRepoPaths = context.workspaceState.get<string[]>('autocommiter.trackedRepos');
+		if (trackedRepoPaths && trackedRepoPaths.length > 0) {
+			return allRepos.filter(r => trackedRepoPaths.includes(r.rootUri.toString()));
+		}
+		return allRepos;
+	}
+
 	// Generate commit message command (prototype)
 	const generateDisposable = vscode.commands.registerCommand('autocommiter.generateMessage', async () => {
-		vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Autocommit: staging, generating and pushing…' }, async (progress) => {
-			progress.report({ message: 'Locating repository…' });
-			try {
-				const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
-				let message = '';
+		if (!api) {
+			vscode.window.showErrorMessage('Git extension not available.');
+			return;
+		}
 
-				if (!gitExt) {
-					vscode.window.showErrorMessage('Git extension not available.');
-					return;
-				}
+		const repos = await getTrackedRepositories();
+		if (repos.length === 0) {
+			vscode.window.showErrorMessage('No Git repositories found or selected.');
+			return;
+		}
 
-				const api = gitExt.getAPI(1);
-				const repo = api.repositories[0];
-				if (!repo) {
-					vscode.window.showErrorMessage('No Git repository found in workspace.');
-					return;
-				}
+		vscode.window.withProgress({ 
+			location: vscode.ProgressLocation.Notification, 
+			title: 'Autocommit: processing repositories…',
+			cancellable: false 
+		}, async (progress) => {
+			const results: { name: string, success: boolean, error?: string }[] = [];
 
+			for (const repo of repos) {
 				const cwd = repo.rootUri?.fsPath;
-				if (!cwd) {
-					vscode.window.showErrorMessage('Repository root not found.');
-					return;
-				}
-
-				// 1) Stage all changes
-				// Safety: ensure .gitignore has protections before staging
-				progress.report({ message: 'Ensuring .gitignore safety…' });
-				try { await ensureGitignoreSafety(cwd); } catch { }
-				progress.report({ message: 'Staging changes (git add .)…' });
-				await runGitCommand('git add .', cwd);
-
-				// 2) Verify staged files exist
-				progress.report({ message: 'Checking staged changes…' });
-				const staged = (await runGitCommand('git diff --staged --name-only', cwd)).trim();
-				if (!staged) {
-					vscode.window.showInformationMessage('No changes to commit — Autocommit skipped.');
-					return;
-				}
-
-				// 3) Try Copilot generator first
-				progress.report({ message: 'Generating commit message (Copilot preferred)…' });
-				let copilotFailed = false;
+				if (!cwd) { continue; }
+				const repoName = path.basename(cwd);
+				
 				try {
-					const copilotResult = await vscode.commands.executeCommand('github.copilot.git.generateCommitMessage');
-					if (copilotResult && typeof copilotResult === 'string' && copilotResult.trim().length > 0) {
-						message = copilotResult.trim();
-						vscode.window.showInformationMessage('Autocommit used Copilot to generate the commit message.');
-					}
-				} catch (e) {
-					copilotFailed = true;
-				}
+					let message = '';
 
-				// 4) If Copilot failed, silently try API-key-based inference fallback.
-				// Prompt only if there is no stored API key (getOrPromptApiKey will prompt and store).
-				if (!message && copilotFailed) {
-					progress.report({ message: 'Generating commit message (API fallback)…' });
+					// 1) Stage all changes
+					progress.report({ message: `[${repoName}] Ensuring .gitignore safety…` });
+					try { await ensureGitignoreSafety(cwd); } catch { }
+					progress.report({ message: `[${repoName}] Staging changes…` });
+					await runGitCommand('git add .', cwd);
+
+					// 2) Verify staged files exist
+					progress.report({ message: `[${repoName}] Checking staged changes…` });
+					const staged = (await runGitCommand('git diff --staged --name-only', cwd)).trim();
+					if (!staged) {
+						continue;
+					}
+
+					// 3) Try Copilot generator first
+					progress.report({ message: `[${repoName}] Generating commit message (Copilot preferred)…` });
+					let copilotFailed = false;
 					try {
-						const apiKey = await getOrPromptApiKey(context);
-						// If user didn't provide a key (they cancelled the prompt), abandon the API fallback silently
-						if (apiKey) {
-							// Get the model to use from settings/cache
-							const selectedModel = await getModelForApi(context, apiKey);
-							if (!selectedModel) {
-								console.log('Autocommiter: no model selected, skipping API fallback.');
-							} else {
-								// Build per-file changes and a compressed JSON payload (<=400 chars) to include with the prompt
-								const fileChanges = await changesSummarizer.buildFileChanges(cwd);
-								const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
-								const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
-								const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
-								try {
-									const aiResult = await callInferenceApi(apiKey, userPrompt, selectedModel);
-									if (aiResult && aiResult.trim().length > 0) {
-										message = aiResult.trim();
-										vscode.window.showInformationMessage(`Autocommit used ${selectedModel} to generate the commit message.`);
-									}
-								} catch (apiErr) {
-									console.error('Autocommiter API call failed', apiErr);
-									vscode.window.showWarningMessage(`API-based generation failed: ${(apiErr as Error)?.message ?? String(apiErr)}. Falling back to local generator.`);
-								}
-							}
-						} else {
-							// no key available; skip silently and fall back to local generator
-							console.log('Autocommiter: no API key available, skipping API fallback.');
+						// Pass the repository to the copilot command if possible
+						const copilotResult = await vscode.commands.executeCommand('github.copilot.git.generateCommitMessage', repo);
+						if (copilotResult && typeof copilotResult === 'string' && copilotResult.trim().length > 0) {
+							message = copilotResult.trim();
 						}
 					} catch (e) {
-						console.error('Autocommiter API key retrieval failed', e);
-						vscode.window.showWarningMessage('Failed to retrieve API key. Falling back to local generator.');
+						copilotFailed = true;
 					}
-				}
 
-				// 5) Fallback generator (local)
-				if (!message) {
-					const current = repo.inputBox.value || '';
-					message = await generateMessageFromContext(current, cwd);
-				}
+					// 4) If Copilot failed, try API-key-based inference fallback.
+					if (!message && copilotFailed) {
+						progress.report({ message: `[${repoName}] Generating commit message (API fallback)…` });
+						try {
+							const apiKey = await getOrPromptApiKey(context);
+							if (apiKey) {
+								const selectedModel = await getModelForApi(context, apiKey);
+								if (selectedModel) {
+									const fileChanges = await changesSummarizer.buildFileChanges(cwd);
+									const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
+									const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
+									const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
+									try {
+										const aiResult = await callInferenceApi(apiKey, userPrompt, selectedModel);
+										if (aiResult && aiResult.trim().length > 0) {
+											message = aiResult.trim();
+										}
+									} catch (apiErr) {
+										console.error(`[${repoName}] API call failed`, apiErr);
+									}
+								}
+							}
+						} catch (e) {
+							console.error(`[${repoName}] API key retrieval failed`, e);
+						}
+					}
 
-				// Apply gitmoji if enabled
-				const config = vscode.workspace.getConfiguration('autocommiter');
-				if (isGitmojEnabled(config)) {
-					message = getGitmojifiedMessage(message);
-				}
+					// 5) Fallback generator (local)
+					if (!message) {
+						const current = repo.inputBox.value || '';
+						message = await generateMessageFromContext(current, cwd);
+					}
 
-				// 5) Commit using temp file to avoid quoting issues
-				progress.report({ message: 'Committing staged changes…' });
-				const tmpFile = path.join(os.tmpdir(), `autocommiter_msg_${Date.now()}.txt`);
-				fs.writeFileSync(tmpFile, message, { encoding: 'utf8' });
-				try {
-					await runGitCommand(`git commit -F "${tmpFile.replace(/"/g, '\\"')}"`, cwd);
-					vscode.window.showInformationMessage('Autocommit committed changes locally.');
-				} finally {
-					// best-effort cleanup
-					try { fs.unlinkSync(tmpFile); } catch { }
-				}
+					// Apply gitmoji if enabled
+					const config = vscode.workspace.getConfiguration('autocommiter');
+					if (isGitmojEnabled(config)) {
+						message = getGitmojifiedMessage(message);
+					}
 
-				// 6) Push
-				progress.report({ message: 'Pushing to remote…' });
-				await runGitCommand('git push', cwd);
-				vscode.window.showInformationMessage('Autocommit pushed changes to remote.');
+					// 5) Commit
+					progress.report({ message: `[${repoName}] Committing changes…` });
+					const tmpFile = path.join(os.tmpdir(), `autocommiter_msg_${Date.now()}_${repoName}.txt`);
+					fs.writeFileSync(tmpFile, message, { encoding: 'utf8' });
+					try {
+						await runGitCommand(`git commit -F "${tmpFile.replace(/"/g, '\\"')}"`, cwd);
+					} finally {
+						try { fs.unlinkSync(tmpFile); } catch { }
+					}
 
-				// 7) Clear the SCM commit input since the message is no longer needed
-				try {
-					repo.inputBox.value = '';
-				} catch (e) {
-					// ignore if unable to clear
+					// 6) Push
+					progress.report({ message: `[${repoName}] Pushing to remote…` });
+					await runGitCommand('git push', cwd);
+					
+					// 7) Clear the SCM commit input
+					try {
+						repo.inputBox.value = '';
+					} catch (e) { }
+
+					results.push({ name: repoName, success: true });
+				} catch (err: any) {
+					console.error(`[${repoName}] Autocommit error`, err);
+					results.push({ name: repoName, success: false, error: err?.message ?? String(err) });
 				}
-			} catch (err: any) {
-				console.error('autocommiter autocommit error', err);
-				vscode.window.showErrorMessage(`Autocommit failed: ${err?.message ?? String(err)}`);
+			}
+
+			// Final summary
+			const successful = results.filter(r => r.success);
+			const failed = results.filter(r => !r.success);
+
+			if (successful.length > 0) {
+				vscode.window.showInformationMessage(`Autocommit successful for: ${successful.map(r => r.name).join(', ')}`);
+			}
+			if (failed.length > 0) {
+				vscode.window.showErrorMessage(`Autocommit failed for: ${failed.map(r => `${r.name} (${r.error})`).join(', ')}`);
+			}
+			if (successful.length === 0 && failed.length === 0) {
+				vscode.window.showInformationMessage('No changes to commit in any repository.');
 			}
 		});
 	});
 
 	context.subscriptions.push(generateDisposable);
+
+	// Select repositories command
+	const selectReposDisposable = vscode.commands.registerCommand('autocommiter.selectRepos', async () => {
+		if (!api) {
+			vscode.window.showErrorMessage('Git extension not available.');
+			return;
+		}
+
+		const allRepos = api.repositories;
+		if (allRepos.length === 0) {
+			vscode.window.showInformationMessage('No Git repositories found.');
+			return;
+		}
+
+		const trackedRepoPaths = context.workspaceState.get<string[]>('autocommiter.trackedRepos') || [];
+
+		const items = allRepos.map(repo => ({
+			label: path.basename(repo.rootUri.fsPath),
+			description: repo.rootUri.fsPath,
+			picked: trackedRepoPaths.length === 0 || trackedRepoPaths.includes(repo.rootUri.toString()),
+			uri: repo.rootUri.toString()
+		}));
+
+		const selected = await vscode.window.showQuickPick(items, {
+			canPickMany: true,
+			placeHolder: 'Select repositories to track for autocommit (leave empty to track all)'
+		});
+
+		if (selected) {
+			const newTrackedPaths = selected.map(s => s.uri);
+			await context.workspaceState.update('autocommiter.trackedRepos', newTrackedPaths);
+			if (newTrackedPaths.length === 0) {
+				vscode.window.showInformationMessage('Autocommit will now track all repositories in the workspace.');
+			} else {
+				vscode.window.showInformationMessage(`Autocommit is now tracking ${newTrackedPaths.length} selected repositories.`);
+			}
+		}
+	});
+	context.subscriptions.push(selectReposDisposable);
 
 	// Refresh models command (fetches from API and caches)
 	const refreshModelsDisposable = vscode.commands.registerCommand('autocommiter.refreshModels', async () => {
