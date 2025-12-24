@@ -67,8 +67,12 @@ async function tryGenerateFromIDE(repo: GitRepository, availableCommands: string
 	commands.sort((a, b) => {
 		const aMatch = appName.includes(a.name.toLowerCase()) || availableCommands.some(c => c.startsWith(a.id.split('.')[0] + '.'));
 		const bMatch = appName.includes(b.name.toLowerCase()) || availableCommands.some(c => c.startsWith(b.id.split('.')[0] + '.'));
-		if (aMatch && !bMatch) return -1;
-		if (!aMatch && bMatch) return 1;
+		if (aMatch && !bMatch) {
+			return -1;
+		}
+		if (!aMatch && bMatch) {
+			return 1;
+		}
 		return 0;
 	});
 
@@ -453,13 +457,13 @@ export function activate(context: vscode.ExtensionContext) {
 					// Apply gitmoji if enabled
 					const config = vscode.workspace.getConfiguration('autocommiter');
 					if (isGitmojEnabled(config)) {
-						message = getGitmojifiedMessage(message);
+						message = getGitmojifiedMessage(message || '');
 					}
 
 					// 5) Commit
 					progress.report({ message: `[${repoName}] Committing changes…` });
 					const tmpFile = path.join(os.tmpdir(), `autocommiter_msg_${Date.now()}_${repoName}.txt`);
-					fs.writeFileSync(tmpFile, message, { encoding: 'utf8' });
+					fs.writeFileSync(tmpFile, message || '', { encoding: 'utf8' });
 					try {
 						await runGitCommand(`git commit -F "${tmpFile.replace(/"/g, '\\"')}"`, cwd);
 					} finally {
