@@ -78,12 +78,16 @@ async function tryGenerateFromIDE(repo: GitRepository, availableCommands: string
 
 	for (const cmd of commands) {
 		if (availableCommands.includes(cmd.id)) {
+			console.log(`Autocommiter: Attempting to use ${cmd.name} command (${cmd.id})`);
 			try {
 				const result = await vscode.commands.executeCommand(cmd.id, repo);
 				if (result && typeof result === 'string' && result.trim().length > 0) {
+					console.log(`Autocommiter: Successfully generated message using ${cmd.name}`);
 					return result.trim();
 				}
+				console.log(`Autocommiter: ${cmd.name} returned empty or invalid result`);
 			} catch (e) {
+				console.error(`Autocommiter: Failed to execute ${cmd.id}`, e);
 				// ignore and try next
 			}
 		}
