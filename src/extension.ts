@@ -54,6 +54,39 @@ function toPosix(rel: string) {
 	return rel.split(path.sep).join('/');
 }
 
+async function tryGenerateFromIDE(repo: GitRepository, availableCommands: string[]): Promise<string | undefined> {
+	const commands = [
+		{ id: 'cursor.generateGitCommitMessage', name: 'Cursor' },
+		{ id: 'antigravity.generateCommitMessage', name: 'Antigravity' },
+		{ id: 'github.copilot.git.generateCommitMessage', name: 'Copilot' },
+		{ id: 'git.generateCommitMessage', name: 'VS Code' }
+	];
+
+	const appName = vscode.env.appName.toLowerCase();
+	// Prioritize based on appName or command prefixes
+	commands.sort((a, b) => {
+		const aMatch = appName.includes(a.name.toLowerCase()) || availableCommands.some(c => c.startsWith(a.id.split('.')[0] + '.'));
+		const bMatch = appName.includes(b.name.toLowerCase()) || availableCommands.some(c => c.startsWith(b.id.split('.')[0] + '.'));
+		if (aMatch && !bMatch) return -1;
+		if (!aMatch && bMatch) return 1;
+		return 0;
+	});
+
+	for (const cmd of commands) {
+		if (availableCommands.includes(cmd.id)) {
+			try {
+				const result = await vscode.commands.executeCommand(cmd.id, repo);
+				if (result && typeof result === 'string' && result.trim().length > 0) {
+					return result.trim();
+				}
+			} catch (e) {
+				// ignore and try next
+			}
+		}
+	}
+	return undefined;
+}
+
 async function getOrPromptApiKey(context: vscode.ExtensionContext): Promise<string | undefined> {
 	const keyId = 'autocommiter.apiKey';
 	try {
@@ -350,6 +383,8 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
+		const availableCommands = await vscode.commands.getCommands(true);
+
 		vscode.window.withProgress({ 
 			location: vscode.ProgressLocation.Notification, 
 			title: 'Autocommit: processing repositories…',
@@ -363,7 +398,7 @@ export function activate(context: vscode.ExtensionContext) {
 				const repoName = path.basename(cwd);
 				
 				try {
-					let message = '';
+					let message: string | undefined = '';
 
 					// 1) Stage all changes
 					progress.report({ message: `[${repoName}] Ensuring .gitignore safety…` });
@@ -378,21 +413,12 @@ export function activate(context: vscode.ExtensionContext) {
 						continue;
 					}
 
-					// 3) Try Copilot generator first
-					progress.report({ message: `[${repoName}] Generating commit message (Copilot preferred)…` });
-					let copilotFailed = false;
-					try {
-						// Pass the repository to the copilot command if possible
-						const copilotResult = await vscode.commands.executeCommand('github.copilot.git.generateCommitMessage', repo);
-						if (copilotResult && typeof copilotResult === 'string' && copilotResult.trim().length > 0) {
-							message = copilotResult.trim();
-						}
-					} catch (e) {
-						copilotFailed = true;
-					}
+					// 3) Try IDE-specific or Copilot generator
+					progress.report({ message: `[${repoName}] Generating commit message (IDE/Copilot)…` });
+					message = await tryGenerateFromIDE(repo, availableCommands);
 
-					// 4) If Copilot failed, try API-key-based inference fallback.
-					if (!message && copilotFailed) {
+					// 4) If IDE/Copilot failed, try API-key-based inference fallback.
+					if (!message) {
 						progress.report({ message: `[${repoName}] Generating commit message (API fallback)…` });
 						try {
 							const apiKey = await getOrPromptApiKey(context);
