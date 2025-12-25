@@ -79,12 +79,22 @@ async function tryGenerateFromIDE(repo: GitRepository, availableCommands: string
 	for (const cmd of commands) {
 		if (availableCommands.includes(cmd.id)) {
 			console.log(`Autocommiter: Attempting to use ${cmd.name} command (${cmd.id})`);
+			const beforeValue = repo.inputBox.value;
 			try {
 				const result = await vscode.commands.executeCommand(cmd.id, repo);
+				
+				// 1. Check if the command returned the message directly
 				if (result && typeof result === 'string' && result.trim().length > 0) {
-					console.log(`Autocommiter: Successfully generated message using ${cmd.name}`);
+					console.log(`Autocommiter: Successfully generated message using ${cmd.name} (returned string)`);
 					return result.trim();
 				}
+
+				// 2. Check if the command updated the input box (common for built-in Git commands)
+				if (repo.inputBox.value && repo.inputBox.value !== beforeValue) {
+					console.log(`Autocommiter: Successfully generated message using ${cmd.name} (updated input box)`);
+					return repo.inputBox.value.trim();
+				}
+
 				console.log(`Autocommiter: ${cmd.name} returned empty or invalid result`);
 			} catch (e) {
 				console.error(`Autocommiter: Failed to execute ${cmd.id}`, e);
@@ -95,7 +105,7 @@ async function tryGenerateFromIDE(repo: GitRepository, availableCommands: string
 	return undefined;
 }
 
-async function getOrPromptApiKey(context: vscode.ExtensionContext): Promise<string | undefined> {
+async function getOrPromptApiKey(context: vscode.ExtensionContext, promptIfNeeded: boolean = true): Promise<string | undefined> {
 	const keyId = 'autocommiter.apiKey';
 	try {
 		const existing = await context.secrets.get(keyId);
@@ -103,6 +113,10 @@ async function getOrPromptApiKey(context: vscode.ExtensionContext): Promise<stri
 			return existing;
 		}
 	} catch { }
+
+	if (!promptIfNeeded) {
+		return undefined;
+	}
 
 	const entered = await vscode.window.showInputBox({
 		prompt: 'Enter GitHub API key (will be stored securely in VS Code SecretStorage)',
@@ -429,7 +443,10 @@ export function activate(context: vscode.ExtensionContext) {
 					if (!message) {
 						progress.report({ message: `[${repoName}] Generating commit message (API fallback)…` });
 						try {
-							const apiKey = await getOrPromptApiKey(context);
+							// Only prompt for API key if we have NO other options and the user hasn't set one up.
+							// But first, check if a key is ALREADY stored.
+							const apiKey = await getOrPromptApiKey(context, false); 
+							
 							if (apiKey) {
 								const selectedModel = await getModelForApi(context, apiKey);
 								if (selectedModel) {
@@ -456,6 +473,18 @@ export function activate(context: vscode.ExtensionContext) {
 					if (!message) {
 						const current = repo.inputBox.value || '';
 						message = await generateMessageFromContext(current, cwd);
+					}
+
+					// 6) If we STILL don't have a message and NO API key was found, 
+					// ONLY THEN prompt the user if they want to set up the API key.
+					if (!message) {
+						const apiKey = await getOrPromptApiKey(context, true);
+						if (apiKey) {
+							// If they just entered a key, we could retry, but for now let's just 
+							// suggest they run the command again.
+							vscode.window.showInformationMessage('API Key saved. Please run Autocommit again to use AI generation.');
+							return;
+						}
 					}
 
 					// Apply gitmoji if enabled
