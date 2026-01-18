@@ -82,7 +82,7 @@ async function tryGenerateFromIDE(repo: GitRepository, availableCommands: string
 			const beforeValue = repo.inputBox.value;
 			try {
 				const result = await vscode.commands.executeCommand(cmd.id, repo);
-				
+
 				// 1. Check if the command returned the message directly
 				if (result && typeof result === 'string' && result.trim().length > 0) {
 					console.log(`Autocommiter: Successfully generated message using ${cmd.name} (returned string)`);
@@ -105,7 +105,27 @@ async function tryGenerateFromIDE(repo: GitRepository, availableCommands: string
 	return undefined;
 }
 
+async function getGithubCLIToken(): Promise<string | undefined> {
+	return new Promise((resolve) => {
+		exec('gh auth token', (error, stdout) => {
+			if (error) {
+				resolve(undefined);
+				return;
+			}
+			const token = stdout.trim();
+			resolve(token || undefined);
+		});
+	});
+}
+
 async function getOrPromptApiKey(context: vscode.ExtensionContext, promptIfNeeded: boolean = true): Promise<string | undefined> {
+	// 1. Try GitHub CLI first (Zero Config preference)
+	const ghToken = await getGithubCLIToken();
+	if (ghToken) {
+		return ghToken;
+	}
+
+	// 2. Check secret storage for manual key
 	const keyId = 'autocommiter.apiKey';
 	try {
 		const existing = await context.secrets.get(keyId);
@@ -118,17 +138,18 @@ async function getOrPromptApiKey(context: vscode.ExtensionContext, promptIfNeede
 		return undefined;
 	}
 
+	// 3. Prompt as absolute last resort
 	const entered = await vscode.window.showInputBox({
-		prompt: 'Enter GitHub API key (will be stored securely in VS Code SecretStorage)',
+		prompt: 'Enter GitHub API key (Only required if not authenticated via GitHub CLI "gh auth login")',
 		ignoreFocusOut: true,
-		password: true
+		password: true,
+		placeHolder: 'Paste your token here...'
 	});
 	if (entered && entered.trim().length > 0) {
 		try {
 			await context.secrets.store(keyId, entered.trim());
 			return entered.trim();
 		} catch (e) {
-			// fallback
 			return entered.trim();
 		}
 	}
@@ -407,10 +428,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const availableCommands = await vscode.commands.getCommands(true);
 
-		vscode.window.withProgress({ 
-			location: vscode.ProgressLocation.Notification, 
+		vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
 			title: 'Autocommit: processing repositories…',
-			cancellable: false 
+			cancellable: false
 		}, async (progress) => {
 			const results: { name: string, success: boolean, error?: string }[] = [];
 
@@ -418,7 +439,7 @@ export function activate(context: vscode.ExtensionContext) {
 				const cwd = repo.rootUri?.fsPath;
 				if (!cwd) { continue; }
 				const repoName = path.basename(cwd);
-				
+
 				try {
 					let message: string | undefined = '';
 
@@ -445,8 +466,8 @@ export function activate(context: vscode.ExtensionContext) {
 						try {
 							// Only prompt for API key if we have NO other options and the user hasn't set one up.
 							// But first, check if a key is ALREADY stored.
-							const apiKey = await getOrPromptApiKey(context, false); 
-							
+							const apiKey = await getOrPromptApiKey(context, false);
+
 							if (apiKey) {
 								const selectedModel = await getModelForApi(context, apiKey);
 								if (selectedModel) {
@@ -475,16 +496,10 @@ export function activate(context: vscode.ExtensionContext) {
 						message = await generateMessageFromContext(current, cwd);
 					}
 
-					// 6) If we STILL don't have a message and NO API key was found, 
-					// ONLY THEN prompt the user if they want to set up the API key.
+					// 6) Final check
 					if (!message) {
-						const apiKey = await getOrPromptApiKey(context, true);
-						if (apiKey) {
-							// If they just entered a key, we could retry, but for now let's just 
-							// suggest they run the command again.
-							vscode.window.showInformationMessage('API Key saved. Please run Autocommit again to use AI generation.');
-							return;
-						}
+						vscode.window.showErrorMessage(`Autocommiter: Authentication failed. Please run "gh auth login" or provide a GitHub API key in settings.`);
+						return;
 					}
 
 					// Apply gitmoji if enabled
@@ -506,7 +521,7 @@ export function activate(context: vscode.ExtensionContext) {
 					// 6) Push
 					progress.report({ message: `[${repoName}] Pushing to remote…` });
 					await runGitCommand('git push', cwd);
-					
+
 					// 7) Clear the SCM commit input
 					try {
 						repo.inputBox.value = '';
@@ -635,12 +650,11 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() { }
 
 // Very small heuristic generator — placeholder for integrating with GitHub/Copilot APIs.
-async function generateMessageFromContext(currentInput: string, repoRoot?: string): Promise<string> {
+async function generateMessageFromContext(currentInput: string, repoRoot?: string): Promise<string | undefined> {
 	// If user already typed something, preserve it verbatim
 	if (currentInput && currentInput.trim().length > 0) {
 		return currentInput.trim();
 	}
 
-	// Otherwise craft a short, generic message. In future this should inspect staged changes or call GitHub/Copilot.
-	return 'chore: automated commit generated by Autocommiter';
+	return undefined;
 }
