@@ -463,12 +463,34 @@ export function activate(context: vscode.ExtensionContext) {
 	const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
 	const api = gitExt?.getAPI(1);
 
-	// Helper to get repositories to process
-	async function getTrackedRepositories(): Promise<GitRepository[]> {
+	// Helper to get all detected repositories (on disk + in API)
+	async function getAllAvailableRepositories(): Promise<GitRepository[]> {
 		if (!api) {
 			return [];
 		}
-		const allRepos = api.repositories;
+
+		// 1. Detect all repos on disk
+		const detectedUris = await findGitRepositories();
+
+		// 2. Ensure they are all opened in the Git API
+		for (const uri of detectedUris) {
+			const alreadyOpen = api.repositories.some(r => r.rootUri.toString() === uri.toString());
+			if (!alreadyOpen) {
+				try {
+					console.log(`Autocommiter: Manually opening repository at ${uri.fsPath}`);
+					await api.openRepository(uri);
+				} catch (e) {
+					console.error(`Autocommiter: Failed to open repository at ${uri.fsPath}`, e);
+				}
+			}
+		}
+
+		return api.repositories;
+	}
+
+	// Helper to get repositories to process
+	async function getTrackedRepositories(): Promise<GitRepository[]> {
+		const allRepos = await getAllAvailableRepositories();
 		const trackedRepoPaths = context.workspaceState.get<string[]>('autocommiter.trackedRepos');
 		if (trackedRepoPaths && trackedRepoPaths.length > 0) {
 			return allRepos.filter(r => trackedRepoPaths.includes(r.rootUri.toString()));
@@ -626,7 +648,7 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		const allRepos = api.repositories;
+		const allRepos = await getAllAvailableRepositories();
 		if (allRepos.length === 0) {
 			vscode.window.showInformationMessage('No Git repositories found.');
 			return;
