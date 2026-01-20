@@ -35,6 +35,55 @@ interface GitAPI {
 	repositories: GitRepository[];
 	onDidOpenRepository: vscode.Event<GitRepository>;
 	onDidCloseRepository: vscode.Event<GitRepository>;
+	openRepository(uri: vscode.Uri): Promise<GitRepository | null>;
+}
+
+async function findGitRepositories(): Promise<vscode.Uri[]> {
+	const repositories: vscode.Uri[] = [];
+	const workspaceFolders = vscode.workspace.workspaceFolders;
+	if (!workspaceFolders) {
+		return repositories;
+	}
+
+	const ignoreList = ['.git', 'node_modules', 'dist', 'out', 'target', 'bin', 'obj', 'vendor'];
+
+	async function walk(dir: string, depth: number = 0) {
+		if (depth > 5) {
+			return;
+		}
+
+		try {
+			const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+
+			// Check if current directory is a git repo
+			const hasGit = entries.some(e => (e.isDirectory() || e.isSymbolicLink()) && e.name === '.git');
+			if (hasGit) {
+				repositories.push(vscode.Uri.file(dir));
+			}
+
+			// Continue walking even if we found a .git (for nested repos)
+			for (const entry of entries) {
+				if (entry.isDirectory() && !ignoreList.includes(entry.name)) {
+					await walk(path.join(dir, entry.name), depth + 1);
+				}
+			}
+		} catch (err) {
+			// Ignore errors
+		}
+	}
+
+	for (const folder of workspaceFolders) {
+		if (folder.uri.scheme === 'file') {
+			await walk(folder.uri.fsPath);
+		}
+	}
+
+	// Remove duplicates
+	const unique = new Map<string, vscode.Uri>();
+	for (const repo of repositories) {
+		unique.set(repo.toString(), repo);
+	}
+	return Array.from(unique.values());
 }
 
 function runGitCommand(cmd: string, cwd: string): Promise<string> {
