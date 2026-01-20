@@ -56,13 +56,15 @@ async function findGitRepositories(): Promise<vscode.Uri[]> {
 			const entries = await fs.promises.readdir(dir, { withFileTypes: true });
 
 			// Check if current directory is a git repo
-			const hasGit = entries.some(e => (e.isDirectory() || e.isSymbolicLink()) && e.name === '.git');
+			// .git can be a directory or a file (in submodules)
+			const hasGit = entries.some(e => e.name === '.git');
 			if (hasGit) {
 				repositories.push(vscode.Uri.file(dir));
 			}
 
 			// Continue walking even if we found a .git (for nested repos)
 			for (const entry of entries) {
+				// Only recurse into real directories to avoid symbolic link loops
 				if (entry.isDirectory() && !ignoreList.includes(entry.name)) {
 					await walk(path.join(dir, entry.name), depth + 1);
 				}
