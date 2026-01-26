@@ -44,7 +44,10 @@ async function findGitRepositories(): Promise<vscode.Uri[]> {
 		return [];
 	}
 
-	// Try to offload to CLI if available
+	const config = vscode.workspace.getConfiguration('autocommiter');
+	const useCLI = config.get<boolean>('useCLI', true);
+
+	// Try to offload to CLI if available (and enabled)
 	try {
 		const repos = await new Promise<string[]>((resolve, reject) => {
 			const roots = workspaceFolders.map(f => f.uri.fsPath).join(',');
@@ -63,10 +66,15 @@ async function findGitRepositories(): Promise<vscode.Uri[]> {
 		});
 		if (repos && repos.length > 0) {
 			console.log(`Autocommiter: CLI discovered ${repos.length} repositories`);
+			// Trigger background check for CLI if many repos found
+			checkAndPromptForCLI(repos.length);
 			return repos.map(r => vscode.Uri.file(r));
 		}
 	} catch (e) {
-		console.log('Autocommiter: CLI discovery failed or not available, falling back to manual walk');
+		// Only log if useCLI was actually enabled
+		if (useCLI) {
+			console.log('Autocommiter: CLI discovery failed or not available, falling back to manual walk');
+		}
 	}
 
 	const repositories: vscode.Uri[] = [];
@@ -499,6 +507,58 @@ async function prepareWithCLI(cwd: string): Promise<boolean> {
 	});
 }
 
+async function installCLI(): Promise<boolean> {
+	return new Promise((resolve) => {
+		vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: 'Autocommiter: Installing CLI tool...',
+			cancellable: false
+		}, async (progress) => {
+			progress.report({ message: 'Downloading and running installer...' });
+			const installCmd = 'curl -fsSL https://raw.githubusercontent.com/nathfavour/autocommiter.go/master/install.sh | bash';
+			exec(installCmd, async (error, stdout, stderr) => {
+				if (error) {
+					console.error(`CLI Installation failed: ${stderr || error.message}`);
+					vscode.window.showErrorMessage(`Autocommiter: CLI Installation failed. Please install manually: ${installCmd}`);
+					resolve(false);
+					return;
+				}
+				vscode.window.showInformationMessage('Autocommiter: CLI tool installed successfully!');
+				// Enable the setting automatically
+				await vscode.workspace.getConfiguration('autocommiter').update('useCLI', true, vscode.ConfigurationTarget.Global);
+				resolve(true);
+			});
+		});
+	});
+}
+
+async function checkAndPromptForCLI(repoCount: number): Promise<void> {
+	const config = vscode.workspace.getConfiguration('autocommiter');
+	const useCLI = config.get<boolean>('useCLI', true);
+
+	// Check if CLI is already installed
+	const isInstalled = await new Promise<boolean>((resolve) => {
+		exec('autocommiter --version', (error) => resolve(!error));
+	});
+
+	if (isInstalled) {
+		return;
+	}
+
+	// Logic to detect heavy workload: many repos or manually triggered
+	if (repoCount > 10) {
+		const result = await vscode.window.showWarningMessage(
+			`Autocommiter detected ${repoCount} repositories. To avoid slowdowns and potential crashes, it is highly recommended to install the Go CLI tool.`,
+			'Install CLI',
+			'Not Now'
+		);
+
+		if (result === 'Install CLI') {
+			await installCLI();
+		}
+	}
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -548,6 +608,12 @@ export function activate(context: vscode.ExtensionContext) {
 	async function getTrackedRepositories(): Promise<GitRepository[]> {
 		const allRepos = await getAllAvailableRepositories();
 		const trackedRepoPaths = context.workspaceState.get<string[]>('autocommiter.trackedRepos');
+		
+		// Large number of repos check
+		if (allRepos.length > 10) {
+			checkAndPromptForCLI(allRepos.length);
+		}
+
 		if (trackedRepoPaths && trackedRepoPaths.length > 0) {
 			return allRepos.filter(r => trackedRepoPaths.includes(r.rootUri.toString()));
 		}

@@ -81,6 +81,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "autocommiter.useCLI": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to use the 'autocommiter' CLI tool for heavy tasks like discovery and summarization. Recommended for large workspaces."
         }
       }
     }
