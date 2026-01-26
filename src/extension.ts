@@ -39,12 +39,37 @@ interface GitAPI {
 }
 
 async function findGitRepositories(): Promise<vscode.Uri[]> {
-	const repositories: vscode.Uri[] = [];
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	if (!workspaceFolders) {
-		return repositories;
+		return [];
 	}
 
+	// Try to offload to CLI if available
+	try {
+		const repos = await new Promise<string[]>((resolve, reject) => {
+			const roots = workspaceFolders.map(f => f.uri.fsPath).join(',');
+			// Use the new list-repos command in the CLI for fast discovery
+			exec(`autocommiter list-repos --repo "${roots}" --json`, (error, stdout) => {
+				if (error) {
+					reject(error);
+					return;
+				}
+				try {
+					resolve(JSON.parse(stdout));
+				} catch {
+					reject(new Error('Failed to parse CLI output'));
+				}
+			});
+		});
+		if (repos && repos.length > 0) {
+			console.log(`Autocommiter: CLI discovered ${repos.length} repositories`);
+			return repos.map(r => vscode.Uri.file(r));
+		}
+	} catch (e) {
+		console.log('Autocommiter: CLI discovery failed or not available, falling back to manual walk');
+	}
+
+	const repositories: vscode.Uri[] = [];
 	const ignoreList = ['.git', 'node_modules', 'dist', 'out', 'target', 'bin', 'obj', 'vendor'];
 
 	async function walk(dir: string, depth: number = 0) {
@@ -445,6 +470,35 @@ async function ensureGitignoreSafety(repoRoot: string): Promise<void> {
 	}
 }
 
+async function summarizeWithCLI(cwd: string): Promise<{ fileNames: string, compressedJson: string } | undefined> {
+	return new Promise((resolve) => {
+		// Offload expensive file change analysis and compression to CLI
+		exec('autocommiter summarize', { cwd }, (error, stdout) => {
+			if (error || !stdout) {
+				resolve(undefined);
+				return;
+			}
+			try {
+				const compressedJson = stdout.trim();
+				const parsed = JSON.parse(compressedJson);
+				const fileNames = (parsed.files || []).map((f: any) => f.f).join('\n');
+				resolve({ fileNames, compressedJson });
+			} catch {
+				resolve(undefined);
+			}
+		});
+	});
+}
+
+async function prepareWithCLI(cwd: string): Promise<boolean> {
+	return new Promise((resolve) => {
+		// Use the new prepare command to offload gitignore safety and staging
+		exec('autocommiter prepare', { cwd }, (error) => {
+			resolve(!error);
+		});
+	});
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -530,11 +584,14 @@ export function activate(context: vscode.ExtensionContext) {
 				try {
 					let message: string | undefined = '';
 
-					// 1) Stage all changes
-					progress.report({ message: `[${repoName}] Ensuring .gitignore safety…` });
-					try { await ensureGitignoreSafety(cwd); } catch { }
-					progress.report({ message: `[${repoName}] Staging changes…` });
-					await runGitCommand('git add .', cwd);
+					// 1) Stage all changes (Offload to CLI if possible)
+					progress.report({ message: `[${repoName}] Preparing repository (CLI/Safety)…` });
+					const prepared = await prepareWithCLI(cwd);
+					if (!prepared) {
+						// Fallback to manual if CLI fails or not found
+						try { await ensureGitignoreSafety(cwd); } catch { }
+						await runGitCommand('git add .', cwd);
+					}
 
 					// 2) Verify staged files exist
 					progress.report({ message: `[${repoName}] Checking staged changes…` });
@@ -566,9 +623,19 @@ export function activate(context: vscode.ExtensionContext) {
 							if (apiKey) {
 								const selectedModel = await getModelForApi(context, apiKey);
 								if (selectedModel) {
-									const fileChanges = await changesSummarizer.buildFileChanges(cwd);
-									const fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
-									const compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
+									let fileNames = '';
+									let compressedJson = '';
+
+									const cliSummary = await summarizeWithCLI(cwd);
+									if (cliSummary) {
+										fileNames = cliSummary.fileNames;
+										compressedJson = cliSummary.compressedJson;
+									} else {
+										const fileChanges = await changesSummarizer.buildFileChanges(cwd);
+										fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
+										compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
+									}
+
 									const userPrompt = `reply only with a very concise but informative commit message, and nothing else:\n\nFiles:\n${fileNames}\n\nSummaryJSON:${compressedJson}`;
 									try {
 										const aiResult = await callInferenceApi(apiKey, userPrompt, selectedModel);
