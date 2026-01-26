@@ -40,6 +40,11 @@
         "command": "autocommiter.selectRepos",
         "title": "Autocommiter: Select Repositories",
         "description": "Choose which repositories to track for autocommit"
+      },
+      {
+        "command": "autocommiter.installCLI",
+        "title": "Autocommiter: Install CLI Tool",
+        "description": "Install the native Go CLI for improved performance"
       }
     ],
     "menus": {

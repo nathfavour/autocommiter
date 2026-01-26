@@ -861,6 +861,12 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(selectModelDisposable);
 
+	// Install CLI command
+	const installCLIDisposable = vscode.commands.registerCommand('autocommiter.installCLI', async () => {
+		await installCLI();
+	});
+	context.subscriptions.push(installCLIDisposable);
+
 	// Status bar item (wand emoji) placed near the right
 	const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	status.text = '🪄 Autocommit';
