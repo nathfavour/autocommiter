@@ -684,7 +684,7 @@ export function activate(context: vscode.ExtensionContext) {
 					let message: string | undefined = '';
 
 					// 1) Stage all changes (Offload to CLI if possible)
-					progress.report({ message: `[${repoName}] Preparing repository (CLI/Safety)…` });
+					progress.report({ message: `[${repoName}] Preparing repository…` });
 					const prepared = await prepareWithCLI(cwd);
 					if (!prepared) {
 						// Fallback to manual if CLI fails or not found
@@ -714,7 +714,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 					let wasCliGenerated = false;
 
-					// 4) Try Autocommiter CLI (Sister tool preference)
+					// 4) Try Autocommiter CLI for generation
 					if (!message) {
 						progress.report({ message: `[${repoName}] Generating commit message (CLI)…` });
 						message = await generateWithCLI(cwd);
@@ -723,7 +723,7 @@ export function activate(context: vscode.ExtensionContext) {
 						}
 					}
 
-					// 5) If CLI failed/not found, try internal API fallback.
+					// 5) If CLI failed/not found, try internal API fallback using CLI summarization
 					if (!message) {
 						progress.report({ message: `[${repoName}] Generating commit message (Extension Fallback)…` });
 						try {
@@ -731,14 +731,17 @@ export function activate(context: vscode.ExtensionContext) {
 							if (apiKey) {
 								const selectedModel = await getModelForApi(context, apiKey);
 								if (selectedModel) {
+									progress.report({ message: `[${repoName}] Summarizing changes with CLI…` });
+									const cliSummary = await summarizeWithCLI(cwd);
+									
 									let fileNames = '';
 									let compressedJson = '';
 
-									const cliSummary = await summarizeWithCLI(cwd);
 									if (cliSummary) {
 										fileNames = cliSummary.fileNames;
 										compressedJson = cliSummary.compressedJson;
 									} else {
+										// Local fallback for summarization if CLI fails
 										const fileChanges = await changesSummarizer.buildFileChanges(cwd);
 										fileNames = fileChanges.map(f => f.file).slice(0, 50).join('\n');
 										compressedJson = changesSummarizer.compressToJson(fileChanges, 400);
